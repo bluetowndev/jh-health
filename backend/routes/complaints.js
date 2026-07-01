@@ -2,6 +2,8 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const Complaint = require('../models/Complaint');
 const NotificationDirectory = require('../models/NotificationDirectory');
+const assignmentService = require('../services/assignmentService');
+const Facility = require('../models/Facility');
 const { protect, requireRole } = require('../middleware/auth');
 const { sendOTPEmail, sendRegistrationOTPEmail, sendComplaintSummaryEmail, sendComplaintAlertEmail } = require('../utils/email');
 
@@ -108,12 +110,84 @@ router.post('/', async (req, res) => {
     }
     verifiedEmailStore.delete(normalizedEmail); // One-time use
 
-    const issueList = Array.isArray(issueCategory) ? issueCategory : [issueCategory];
+    const issueList = Array.isArray(issueCategory)
+      ? issueCategory
+      : [issueCategory];
+
+    // ==========================
+    // AUTO ASSIGN ENGINEER
+    // ==========================
+
+    const assignment = await assignmentService.autoAssignEngineer(facilityCode);
+
+    let assignedEngineer = null;
+    let assignedAt = null;
+    // IMPORTANT: status ALWAYS starts as "open", even when auto-assigned.
+    // It only moves to "in_progress" when the engineer starts work.
+    const complaintStatus = "open";
+
+    if (assignment.engineer) {
+      assignedEngineer = assignment.engineer._id;
+      assignedAt = new Date();
+    }
+
+    // ==========================
+    // CREATE COMPLAINT
+    // ==========================
+
     const complaint = await Complaint.create({
-      userName, mobile, email, district, facilityType, facilityName, facilityCode,
-      issueCategory: issueList, issueDescription,
-      attachmentUrls: Array.isArray(attachmentUrls) ? attachmentUrls.slice(0, 2) : [],
-      activityLog: [{ action: 'Complaint Registered', performedBy: userName, performedByRole: 'user', notes: `Issue(s): ${issueList.join(', ')}` }]
+
+      userName,
+      mobile,
+      email,
+
+      district,
+
+      facilityType,
+
+      facilityName,
+
+      facilityCode,
+
+      issueCategory: issueList,
+
+      issueDescription,
+
+      attachmentUrls: Array.isArray(attachmentUrls)
+        ? attachmentUrls.slice(0, 2)
+        : [],
+
+      assignedTo: assignedEngineer,
+
+      assignedAt,
+
+      status: complaintStatus,
+
+      activityLog: [
+
+        {
+          action: "Complaint Registered",
+          performedBy: userName,
+          performedByRole: "user",
+          notes: `Issue(s): ${issueList.join(", ")}`
+        },
+
+        {
+          action: assignment.engineer
+            ? "Complaint Assigned"
+            : "Assignment Pending",
+
+          performedBy: "System",
+
+          performedByRole: "system",
+
+          notes: assignment.engineer
+            ? `Automatically assigned to ${assignment.engineer.name}\nDistrict : ${assignment.district}`
+            : assignment.message
+        }
+
+      ]
+
     });
 
     // Send complaint summary email (best effort; do not block registration on mail errors)
@@ -125,7 +199,8 @@ router.post('/', async (req, res) => {
       console.error('Complaint summary email failed:', emailErr);
     }
 
-    // Notify mapped field engineer/team lead + always-notified contacts (best effort)
+    // Notify auto-assigned engineer (if any) + team lead / state head / ops manager
+    // from NotificationDirectory (best effort)
     let stakeholderEmailSent = true;
     try {
       const directory = await NotificationDirectory.findOne({ key: 'default' });
@@ -138,7 +213,15 @@ router.post('/', async (req, res) => {
         if (normalized === normalizedEmail) return; // user already gets summary email
         recipientSet.add(normalized);
       };
-      addRecipient(mapping?.engineer?.email);
+
+      // Notify the actually auto-assigned engineer (replaces old facilityCode -> engineer mapping)
+      if (assignment.engineer) {
+        addRecipient(assignment.engineer.email);
+      } else {
+        // No engineer auto-assigned; fall back to old mapping so someone still gets notified
+        addRecipient(mapping?.engineer?.email);
+      }
+
       addRecipient(mapping?.teamLead?.email);
       addRecipient(directory?.stateHead?.email);
       addRecipient(directory?.opsManager?.email);
@@ -227,27 +310,43 @@ router.get('/track/:ticketId', async (req, res) => {
   }
 });
 
-// GET /api/complaints - Admin: all, Engineer: by district
+// GET /api/complaints - Admin: all, Engineer: only assigned complaints
 router.get('/', protect, async (req, res) => {
   try {
     const { status, district, facilityType, page = 1, limit = 20 } = req.query;
+
     const filter = {};
 
-    // Engineers see ALL complaints statewide (no district restriction)
+    // Engineer can only see complaints assigned to them
+    if (req.user.role === "engineer") {
+      filter.assignedTo = req.user._id;
+    }
+
+    // Optional filters
     if (status) filter.status = status;
     if (district) filter.district = district;
     if (facilityType) filter.facilityType = facilityType;
 
     const total = await Complaint.countDocuments(filter);
+
     const complaints = await Complaint.find(filter)
-      .populate('assignedTo', 'name email')
+      .populate("assignedTo", "name email")
       .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
+      .skip((Number(page) - 1) * Number(limit))
       .limit(Number(limit));
 
-    res.json({ complaints, total, page: Number(page), pages: Math.ceil(total / limit) });
+    res.json({
+      complaints,
+      total,
+      page: Number(page),
+      pages: Math.ceil(total / Number(limit))
+    });
+
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    res.status(500).json({
+      message: "Server error",
+      error: err.message
+    });
   }
 });
 
@@ -271,6 +370,12 @@ router.get('/:id', protect, async (req, res) => {
   try {
     const complaint = await Complaint.findById(req.params.id).populate('assignedTo', 'name email role');
     if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
+
+    // Engineer can only view complaints assigned to them
+    if (req.user.role === 'engineer' && (!complaint.assignedTo || String(complaint.assignedTo._id) !== String(req.user._id))) {
+      return res.status(403).json({ message: 'Access denied. This complaint is not assigned to you.' });
+    }
+
     res.json(complaint);
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
@@ -286,7 +391,7 @@ router.patch('/:id/assign', protect, requireRole('admin'), async (req, res) => {
       {
         assignedTo: engineerId,
         assignedAt: new Date(),
-        status: 'in_progress',
+        status: 'open',
         $push: { activityLog: { action: 'Assigned to Engineer', performedBy: req.user.name, performedByRole: 'admin', timestamp: new Date() } }
       },
       { new: true }
@@ -303,6 +408,11 @@ router.patch('/:id/status', protect, async (req, res) => {
     const { status, notes, priority, otp } = req.body;
     const complaint = await Complaint.findById(req.params.id);
     if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
+
+    // Engineer can only update complaints assigned to them
+    if (req.user.role === 'engineer' && (!complaint.assignedTo || String(complaint.assignedTo) !== String(req.user._id))) {
+      return res.status(403).json({ message: 'Access denied. This complaint is not assigned to you.' });
+    }
 
     // Resolved status requires OTP verification
     if (status === 'resolved') {

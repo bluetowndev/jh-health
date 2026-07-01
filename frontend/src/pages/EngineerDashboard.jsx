@@ -95,8 +95,8 @@ export default function EngineerDashboard() {
         <div className="mb-3">
           <div className="flex justify-between items-center mb-2">
             <div>
-              <h2>All Complaints — Jharkhand</h2>
-              <p className="text-sm text-muted mt-1">Viewing all {total} complaints statewide</p>
+              <h2>My Assigned Complaints</h2>
+              <p className="text-sm text-muted mt-1">Viewing {total} complaints assigned to you</p>
             </div>
           </div>
           <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
@@ -116,7 +116,7 @@ export default function EngineerDashboard() {
         <div className="grid-3" style={{ gap: 16 }}>
           {complaints.length === 0 && (
             <div className="card" style={{ gridColumn: '1/-1' }}>
-              <div className="empty-state"><div className="empty-icon">🎉</div><div className="empty-title">No tickets found</div><div className="empty-desc">All {filter.status || ''} tickets handled!</div></div>
+              <div className="empty-state"><div className="empty-icon">🎉</div><div className="empty-title">No tickets found</div><div className="empty-desc">No {filter.status || ''} tickets assigned to you right now!</div></div>
             </div>
           )}
           {complaints.map(c => (
