@@ -1,11 +1,19 @@
 import axios from 'axios';
 
-// Use REACT_APP_API_URL in production (e.g. Render); fallback to /api for local dev (proxy)
-const API_BASE = process.env.REACT_APP_API_URL
-  ? `${process.env.REACT_APP_API_URL.replace(/\/$/, '')}/api`
-  : '/api';
 
-const API = axios.create({ baseURL: API_BASE });
+// Use REACT_APP_API_URL in production (e.g. Render); fallback to /api for local dev (proxy)
+// const API_BASE = process.env.REACT_APP_API_URL
+  // ? `${process.env.REACT_APP_API_URL.replace(/\/$/, '')}/api`
+  // : '/api';
+
+  // console.log("API_BASE =", API_BASE);
+
+  const API = axios.create({
+  baseURL: "http://localhost:5000/api"
+});
+
+console.log("Using Backend:", API.defaults.baseURL);
+
 
 // Attach token to every request
 API.interceptors.request.use(config => {
@@ -44,6 +52,8 @@ export const saveFacilityNotificationMapping = (facilityCode, data) => API.put(`
 export const sendEmailOTP = (email) => API.post('/complaints/send-email-otp', { email });
 export const verifyEmailOTP = (email, otp) => API.post('/complaints/verify-email-otp', { email, otp });
 export const submitComplaint = (data) => API.post('/complaints', data);
+export const checkDuplicateComplaint = (facilityCode, issueCategory) =>
+  API.get('/complaints/check-duplicate', { params: { facilityCode, issueCategory: issueCategory.join(',') } });
 export const uploadComplaintImages = (files) => {
   const formData = new FormData();
   files.forEach((f) => formData.append('images', f));
@@ -57,6 +67,7 @@ export const getComplaints = (params) => API.get('/complaints', { params });
 export const getComplaintStats = () => API.get('/complaints/stats');
 export const getComplaintById = (id) => API.get(`/complaints/${id}`);
 export const assignComplaint = (id, engineerId) => API.patch(`/complaints/${id}/assign`, { engineerId });
+export const acceptTicket = (id) => API.patch(`/complaints/${id}/accept`, {});
 export const updateComplaintStatus = (id, data) => API.patch(`/complaints/${id}/status`, data);
 
 // Users

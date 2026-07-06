@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getComplaints, updateComplaintStatus } from '../api';
+import { getComplaints, updateComplaintStatus, acceptTicket } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import StatusBadge from '../components/StatusBadge';
@@ -17,6 +17,7 @@ export default function EngineerDashboard() {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
   const [awaitingOtp, setAwaitingOtp] = useState(false);
+  const [acceptingId, setAcceptingId] = useState(null);
 
   useEffect(() => {
     if (!user || user.role !== 'engineer') { navigate('/login'); return; }
@@ -37,6 +38,21 @@ export default function EngineerDashboard() {
     setFormData({ status: c.status, notes: '', otp: '' });
     setAwaitingOtp(false);
     setModal(true);
+  };
+
+  const handleAccept = async (c) => {
+    setAcceptingId(c._id);
+    try {
+      await acceptTicket(c._id);
+      setMsg(`✅ Ticket ${c.ticketId} accepted. Status is now "in_progress".`);
+      loadComplaints();
+      setTimeout(() => setMsg(''), 4000);
+    } catch (e) {
+      const errMsg = e.response?.data?.message || 'Failed to accept ticket';
+      alert(errMsg);
+    } finally {
+      setAcceptingId(null);
+    }
   };
 
   const handleUpdate = async () => {
@@ -141,9 +157,19 @@ export default function EngineerDashboard() {
                 <div className="text-xs text-muted mt-2">Submitted: {fmt(c.createdAt)}</div>
               </div>
               <div style={{ padding: '12px 18px', borderTop: '1px solid var(--gray-100)' }}>
-                <button className="btn btn-primary btn-sm btn-block" onClick={() => openModal(c)}>
-                  Update Ticket
-                </button>
+                {c.status === 'open' ? (
+                  <button
+                    className="btn btn-success btn-sm btn-block"
+                    onClick={() => handleAccept(c)}
+                    disabled={acceptingId === c._id}
+                  >
+                    {acceptingId === c._id ? <span className="spinner" /> : '✓ Accept Ticket'}
+                  </button>
+                ) : (
+                  <button className="btn btn-primary btn-sm btn-block" onClick={() => openModal(c)}>
+                    Update Ticket
+                  </button>
+                )}
               </div>
             </div>
           ))}

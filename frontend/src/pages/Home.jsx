@@ -1,5 +1,5 @@
 import { useState, useEffect, Fragment, useRef } from 'react';
-import { getDistricts, getFacilityTypes, getFacilities, sendEmailOTP, verifyEmailOTP, submitComplaint, uploadComplaintImages } from '../api';
+import { getDistricts, getFacilityTypes, getFacilities, sendEmailOTP, verifyEmailOTP, submitComplaint, uploadComplaintImages, checkDuplicateComplaint } from '../api';
 import Navbar from '../components/Navbar';
 import HomeHeroBanner from '../components/HomeHeroBanner';
 import PublicFooter from '../components/PublicFooter';
@@ -170,6 +170,9 @@ export default function Home() {
   const [otpError, setOtpError] = useState('');
   const [imageUploading, setImageUploading] = useState(false);
   const [imageError, setImageError] = useState('');
+  const [duplicateCheck, setDuplicateCheck] = useState(null); // { ticketId, message } | null
+  const [duplicateChecking, setDuplicateChecking] = useState(false);
+  const [duplicateDismissed, setDuplicateDismissed] = useState(false);
   const navigate = useNavigate();
   const prevDistrictRef = useRef('');
   const prevFacilityTypeRef = useRef('');
@@ -222,6 +225,13 @@ export default function Home() {
     localStorage.setItem(COMPLAINT_DRAFT_KEY, JSON.stringify(payload));
   }, [step, form, emailVerified]);
 
+  // Reset the duplicate warning whenever facility or issue selection changes,
+  // so a stale "duplicate found" banner doesn't linger after the user edits their selection.
+  useEffect(() => {
+    setDuplicateCheck(null);
+    setDuplicateDismissed(false);
+  }, [form.facilityCode, form.issueCategory]);
+
   const set = (k, v) => {
     setForm(f => ({ ...f, [k]: v }));
     if (k === 'email') {
@@ -264,10 +274,77 @@ export default function Home() {
     setErrors(e => ({ ...e, issueCategory: undefined }));
   };
 
-  const next = () => {
-    const valid = [validate0, validate1, validate2][step]?.();
-    if (valid !== false) setStep(s => s + 1);
-  };
+  // FEATURE: Pre-submit duplicate check, run right after Issue selection (Step 2),
+  // before the user proceeds to Confirm. Non-blocking by default — just a clear warning.
+ const runDuplicateCheck = async () => {
+
+  if (!form.facilityCode || form.issueCategory.length === 0)
+    return false;
+
+  setDuplicateChecking(true);
+
+  try {
+
+    const res = await checkDuplicateComplaint(
+      form.facilityCode,
+      form.issueCategory
+    );
+
+    if (res.data?.duplicate) {
+
+      setDuplicateCheck({
+        ticketId: res.data.ticketId,
+        status: res.data.status,
+        message: res.data.message
+      });
+
+      toast.error(
+        `Complaint already registered.\nTicket : ${res.data.ticketId}`,
+        { duration: 6000 }
+      );
+
+      return true;
+    }
+
+    setDuplicateCheck(null);
+
+    return false;
+
+  } catch (err) {
+
+    console.error(err);
+
+    return false;
+
+  } finally {
+
+    setDuplicateChecking(false);
+
+  }
+
+};
+
+  const next = async () => {
+
+  const valid = [validate0, validate1, validate2][step]?.();
+
+  if (valid === false)
+    return;
+
+  // When leaving Issue step
+  if (step === 2) {
+
+    const duplicate = await runDuplicateCheck();
+
+    if (duplicate) {
+      return;
+    }
+
+  }
+
+  setStep(s => s + 1);
+
+};
   const back = () => setStep(s => s - 1);
   const resetForm = () => {
     setStep(0);
@@ -279,6 +356,8 @@ export default function Home() {
     setOtpInput('');
     setOtpError('');
     setImageError('');
+    setDuplicateCheck(null);
+    setDuplicateDismissed(false);
     localStorage.removeItem(COMPLAINT_DRAFT_KEY);
     toast.success('Form cleared successfully.');
   };
@@ -373,9 +452,22 @@ export default function Home() {
   };
 
   const handleSubmit = async () => {
+    if (loading) return; // guard against double-click / double-submit
     setLoading(true);
     try {
       const res = await submitComplaint(form);
+
+      if (res.data?.duplicate) {
+        // Authoritative server-side check caught a duplicate even if the earlier
+        // pre-check missed it (e.g. someone else registered one in between).
+        localStorage.removeItem(COMPLAINT_DRAFT_KEY);
+        localStorage.setItem('trackEmail', (form.email || '').toLowerCase().trim());
+        localStorage.setItem('trackMobile', (form.mobile || '').trim());
+        setSubmitted({ ticketId: res.data.ticketId, isDuplicate: true });
+        toast(res.data.message || 'Complaint already exists.', { icon: 'ℹ️' });
+        return;
+      }
+
       localStorage.removeItem(COMPLAINT_DRAFT_KEY);
       // Prefill tracking contact without exposing ticket id in URL.
       localStorage.setItem('trackEmail', (form.email || '').toLowerCase().trim());
@@ -403,15 +495,19 @@ export default function Home() {
               <div className="success-icon">
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#1A7A4A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
               </div>
-              <h2>Complaint Registered!</h2>
-              <p className="text-muted mt-1">Your issue has been submitted. Please save your ticket ID to track the status.</p>
+              <h2>{submitted.isDuplicate ? 'Complaint Already Registered' : 'Complaint Registered!'}</h2>
+              <p className="text-muted mt-1">
+                {submitted.isDuplicate
+                  ? 'A similar complaint for this facility and issue is already open. Here is your existing ticket ID.'
+                  : 'Your issue has been submitted. Please save your ticket ID to track the status.'}
+              </p>
               <div className="ticket-id-display">
-                <div className="ticket-id-label">Your Ticket ID</div>
+                <div className="ticket-id-label">{submitted.isDuplicate ? 'Existing Ticket ID' : 'Your Ticket ID'}</div>
                 <div className="ticket-id-value">{submitted.ticketId}</div>
               </div>
               <div className="flex gap-2 mt-3" style={{ justifyContent: 'center', flexWrap: 'wrap' }}>
                 <button className="btn btn-outline" onClick={() => navigate('/track')}>Track Status</button>
-                <button className="btn btn-primary" onClick={() => { setSubmitted(null); setStep(0); setForm(INITIAL_FORM); setEmailVerified(false); setOtpSent(false); setOtpInput(''); setOtpError(''); setImageError(''); localStorage.removeItem(COMPLAINT_DRAFT_KEY); localStorage.removeItem('trackEmail'); localStorage.removeItem('trackMobile'); }}>New Complaint</button>
+                <button className="btn btn-primary" onClick={() => { setSubmitted(null); setStep(0); setForm(INITIAL_FORM); setEmailVerified(false); setOtpSent(false); setOtpInput(''); setOtpError(''); setImageError(''); setDuplicateCheck(null); setDuplicateDismissed(false); localStorage.removeItem(COMPLAINT_DRAFT_KEY); localStorage.removeItem('trackEmail'); localStorage.removeItem('trackMobile'); }}>New Complaint</button>
               </div>
             </div>
           </div>
@@ -647,6 +743,37 @@ export default function Home() {
               <div>
                 <h3 className="complaint-step-heading">Confirm Your Complaint</h3>
                 {errors.submit && <div className="alert alert-error">{errors.submit}</div>}
+
+                {duplicateCheck && !duplicateDismissed && (
+                  <div className="alert alert-info mb-3" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div>
+                      <strong>Similar complaint already registered.</strong>
+                      <div className="text-sm mt-1">{duplicateCheck.message}</div>
+                      <div className="text-sm mt-1">Existing Ticket ID: <strong>{duplicateCheck.ticketId}</strong></div>
+                    </div>
+                    <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm"
+                        onClick={() => {
+                          localStorage.setItem('trackEmail', (form.email || '').toLowerCase().trim());
+                          localStorage.setItem('trackMobile', (form.mobile || '').trim());
+                          navigate('/track');
+                        }}
+                      >
+                        Track This Ticket
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setDuplicateDismissed(true)}
+                      >
+                        This is a different issue — Continue Anyway
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="card" style={{ background: 'var(--gray-50)', marginBottom: 20 }}>
                   <div className="card-body" style={{ padding: 20 }}>
                     <div className="grid-2" style={{ gap: 12 }}>
@@ -709,11 +836,16 @@ export default function Home() {
                 Reset Form
               </button>
               {step < 3 ? (
-                <button type="button" className="btn btn-primary complaint-primary-action" onClick={next}>
-                  Continue
+                <button type="button" className="btn btn-primary complaint-primary-action" onClick={next} disabled={duplicateChecking}>
+                  {duplicateChecking ? <><span className="spinner" /> Checking...</> : 'Continue'}
                 </button>
               ) : (
-                <button type="button" className="btn btn-primary complaint-primary-action" onClick={handleSubmit} disabled={loading}>
+                <button
+                  type="button"
+                  className="btn btn-primary complaint-primary-action"
+                  onClick={handleSubmit}
+                  disabled={loading || (duplicateCheck && !duplicateDismissed)}
+                >
                   {loading ? <><span className="spinner" /> Submitting...</> : '✓ Submit Complaint'}
                 </button>
               )}
