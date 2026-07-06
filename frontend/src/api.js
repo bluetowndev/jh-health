@@ -2,17 +2,13 @@ import axios from 'axios';
 
 
 // Use REACT_APP_API_URL in production (e.g. Render); fallback to /api for local dev (proxy)
-// const API_BASE = process.env.REACT_APP_API_URL
-  // ? `${process.env.REACT_APP_API_URL.replace(/\/$/, '')}/api`
-  // : '/api';
+const API_BASE = process.env.REACT_APP_API_URL
+  ? `${process.env.REACT_APP_API_URL.replace(/\/$/, '')}/api`
+  : '/api';
 
-  // console.log("API_BASE =", API_BASE);
+  console.log("API_BASE =", API_BASE);
 
-  const API = axios.create({
-  baseURL: "http://localhost:5000/api"
-});
-
-console.log("Using Backend:", API.defaults.baseURL);
+  
 
 
 // Attach token to every request
