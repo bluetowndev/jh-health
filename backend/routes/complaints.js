@@ -3,14 +3,16 @@ const bcrypt = require('bcryptjs');
 const Complaint = require('../models/Complaint');
 const NotificationDirectory = require('../models/NotificationDirectory');
 const assignmentService = require('../services/assignmentService');
+const notificationService = require('../services/notificationService');
 const Facility = require('../models/Facility');
 const { protect, requireRole } = require('../middleware/auth');
-const { sendOTPEmail, sendRegistrationOTPEmail, sendComplaintSummaryEmail, sendComplaintAlertEmail } = require('../utils/email');
+const { sendOTPEmail } = require('../utils/email');
 
 const router = express.Router();
 
 const OTP_EXPIRY_MINUTES = 15;
 const EMAIL_VERIFIED_EXPIRY_MS = 30 * 60 * 1000; // 30 min
+const DUPLICATE_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 // In-memory store: email -> { otpHash, expiry } for registration OTP
 const registrationOTPStore = new Map();
@@ -19,7 +21,9 @@ const verifiedEmailStore = new Map();
 
 function generateOTP() {
   return String(Math.floor(100000 + Math.random() * 900000));
+  
 }
+
 
 function cleanupExpiredOTP() {
   const now = new Date();
@@ -47,6 +51,7 @@ router.post('/send-email-otp', async (req, res) => {
     registrationOTPStore.set(normalized, { otpHash, expiry });
 
     try {
+      const { sendRegistrationOTPEmail } = require('../utils/email');
       await sendRegistrationOTPEmail(normalized, otpCode);
     } catch (emailErr) {
       console.error('Registration OTP email failed:', emailErr);
@@ -93,6 +98,47 @@ router.post('/verify-email-otp', async (req, res) => {
   }
 });
 
+// GET /api/complaints/check-duplicate - Public, read-only pre-check (no complaint is created)
+// Used by the frontend right after Issue selection, before OTP/contact details/submit.
+router.get('/check-duplicate', async (req, res) => {
+  try {
+    const { facilityCode, issueCategory } = req.query;
+
+    if (!facilityCode) {
+      return res.status(400).json({ message: 'facilityCode is required' });
+    }
+
+    const issueList = Array.isArray(issueCategory)
+      ? issueCategory
+      : String(issueCategory || '').split(',').map(s => s.trim()).filter(Boolean);
+
+    if (issueList.length === 0) {
+      return res.status(400).json({ message: 'issueCategory is required' });
+    }
+
+    const duplicateWindowStart = new Date(Date.now() - DUPLICATE_WINDOW_MS);
+
+    const existingComplaint = await Complaint.findOne({
+      facilityCode,
+      issueCategory: { $in: issueList },
+      status: { $in: ['open', 'in_progress'] },
+      createdAt: { $gte: duplicateWindowStart }
+    }).sort({ createdAt: -1 });
+
+    if (existingComplaint) {
+      return res.json({
+        duplicate: true,
+        ticketId: existingComplaint.ticketId,
+        message: 'A complaint for this facility and issue is already registered.'
+      });
+    }
+
+    res.json({ duplicate: false });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
 // POST /api/complaints - Public (end user submits)
 router.post('/', async (req, res) => {
   try {
@@ -115,6 +161,32 @@ router.post('/', async (req, res) => {
       : [issueCategory];
 
     // ==========================
+    // FEATURE 2: DUPLICATE COMPLAINT DETECTION
+    // Same facilityCode + overlapping issueCategory + status open/in_progress
+    // + created within last 24 hours => block duplicate
+    // ==========================
+
+    const duplicateWindowStart = new Date(Date.now() - DUPLICATE_WINDOW_MS);
+
+    const existingComplaint = await Complaint.findOne({
+      facilityCode,
+      issueCategory: { $in: issueList },
+      status: { $in: ['open', 'in_progress'] },
+      createdAt: { $gte: duplicateWindowStart }
+    }).sort({ createdAt: -1 });
+
+    if (existingComplaint) {
+        return res.status(200).json({
+      duplicate: true,
+      ticketId: existingComplaint.ticketId,
+      status: existingComplaint.status,
+      facilityName: existingComplaint.facilityName,
+      district: existingComplaint.district,
+      message: "Complaint already registered from this facility."
+  });
+}
+
+    // ==========================
     // AUTO ASSIGN ENGINEER
     // ==========================
 
@@ -123,7 +195,7 @@ router.post('/', async (req, res) => {
     let assignedEngineer = null;
     let assignedAt = null;
     // IMPORTANT: status ALWAYS starts as "open", even when auto-assigned.
-    // It only moves to "in_progress" when the engineer starts work.
+    // It only moves to "in_progress" when the engineer accepts the ticket.
     const complaintStatus = "open";
 
     if (assignment.engineer) {
@@ -190,47 +262,13 @@ router.post('/', async (req, res) => {
 
     });
 
-    // Send complaint summary email (best effort; do not block registration on mail errors)
-    let summaryEmailSent = true;
-    try {
-      await sendComplaintSummaryEmail(normalizedEmail, complaint);
-    } catch (emailErr) {
-      summaryEmailSent = false;
-      console.error('Complaint summary email failed:', emailErr);
-    }
-
-    // Notify auto-assigned engineer (if any) + team lead / state head / ops manager
-    // from NotificationDirectory (best effort)
-    let stakeholderEmailSent = true;
-    try {
-      const directory = await NotificationDirectory.findOne({ key: 'default' });
-      const mapping = directory?.mappings?.find(m => m.facilityCode === complaint.facilityCode);
-      const recipientSet = new Set();
-      const addRecipient = (email) => {
-        const normalized = String(email || '').toLowerCase().trim();
-        if (!normalized) return;
-        if (!/\S+@\S+\.\S+/.test(normalized)) return;
-        if (normalized === normalizedEmail) return; // user already gets summary email
-        recipientSet.add(normalized);
-      };
-
-      // Notify the actually auto-assigned engineer (replaces old facilityCode -> engineer mapping)
-      if (assignment.engineer) {
-        addRecipient(assignment.engineer.email);
-      } else {
-        // No engineer auto-assigned; fall back to old mapping so someone still gets notified
-        addRecipient(mapping?.engineer?.email);
-      }
-
-      addRecipient(mapping?.teamLead?.email);
-      addRecipient(directory?.stateHead?.email);
-      addRecipient(directory?.opsManager?.email);
-      const recipients = [...recipientSet];
-      if (recipients.length) await sendComplaintAlertEmail(recipients, complaint);
-    } catch (emailErr) {
-      stakeholderEmailSent = false;
-      console.error('Stakeholder alert email failed:', emailErr);
-    }
+    // ==========================
+    // FEATURE 3: Assigned notification (customer summary + stakeholder alert)
+    // ==========================
+    const { summaryEmailSent, stakeholderEmailSent } = await notificationService.notifyAssigned(
+      complaint,
+      assignment.engineer
+    );
 
     res.status(201).json({
       message: 'Complaint registered successfully',
@@ -396,7 +434,57 @@ router.patch('/:id/assign', protect, requireRole('admin'), async (req, res) => {
       },
       { new: true }
     ).populate('assignedTo', 'name email');
+
+    // FEATURE 3: notify on manual assignment too
+    if (complaint?.assignedTo) {
+      notificationService.notifyAssigned(complaint, complaint.assignedTo).catch(err =>
+        console.error('Manual assignment notification failed:', err)
+      );
+    }
+
     res.json(complaint);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// ==========================================================
+// FEATURE 1: PATCH /api/complaints/:id/accept - Engineer accepts an assigned open ticket
+// (No email is sent on acceptance, by design)
+// ==========================================================
+router.patch('/:id/accept', protect, requireRole('engineer'), async (req, res) => {
+  try {
+    const complaint = await Complaint.findById(req.params.id).populate('assignedTo', 'name email');
+    if (!complaint) return res.status(404).json({ message: 'Complaint not found' });
+
+    // Only the assigned engineer can accept this ticket
+    if (!complaint.assignedTo || String(complaint.assignedTo._id) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'Access denied. This ticket is not assigned to you.' });
+    }
+
+    // Cannot accept a ticket that isn't in "open" state (already accepted / resolved / closed)
+    if (complaint.status !== 'open') {
+      return res.status(400).json({ message: `Ticket cannot be accepted from status "${complaint.status}".` });
+    }
+
+    const updated = await Complaint.findByIdAndUpdate(
+      req.params.id,
+      {
+        status: 'in_progress',
+        acceptedAt: new Date(),
+        $push: {
+          activityLog: {
+            action: 'Ticket Accepted',
+            performedBy: req.user.name,
+            performedByRole: 'engineer',
+            timestamp: new Date()
+          }
+        }
+      },
+      { new: true }
+    ).populate('assignedTo', 'name email');
+
+    res.json(updated);
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
@@ -470,6 +558,12 @@ router.patch('/:id/status', protect, async (req, res) => {
         },
         { new: true }
       ).populate('assignedTo', 'name email');
+
+      // FEATURE 3: notify on resolution
+      notificationService.notifyResolved(updated).catch(err =>
+        console.error('Ticket resolved notification failed:', err)
+      );
+
       return res.json(updated);
     }
 
@@ -484,6 +578,14 @@ router.patch('/:id/status', protect, async (req, res) => {
 
     const result = await Complaint.findByIdAndUpdate(req.params.id, updates, { new: true })
       .populate('assignedTo', 'name email');
+
+    // FEATURE 3: notify on closure
+    if (status === 'closed') {
+      notificationService.notifyClosed(result).catch(err =>
+        console.error('Ticket closed notification failed:', err)
+      );
+    }
+
     res.json(result);
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
