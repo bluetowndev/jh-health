@@ -1,15 +1,11 @@
 import axios from 'axios';
 
-
 // Use REACT_APP_API_URL in production (e.g. Render); fallback to /api for local dev (proxy)
 const API_BASE = process.env.REACT_APP_API_URL
   ? `${process.env.REACT_APP_API_URL.replace(/\/$/, '')}/api`
   : '/api';
 
-  console.log("API_BASE =", API_BASE);
-
-  
-
+const API = axios.create({ baseURL: API_BASE });
 
 // Attach token to every request
 API.interceptors.request.use(config => {
@@ -45,11 +41,11 @@ export const saveGlobalNotificationContacts = (data) => API.put('/notifications/
 export const saveFacilityNotificationMapping = (facilityCode, data) => API.put(`/notifications/mappings/${facilityCode}`, data);
 
 // Complaints (public)
+export const checkDuplicateComplaint = (facilityCode, issueCategory) =>
+  API.get('/complaints/check-duplicate', { params: { facilityCode, issueCategory: issueCategory.join(',') } });
 export const sendEmailOTP = (email) => API.post('/complaints/send-email-otp', { email });
 export const verifyEmailOTP = (email, otp) => API.post('/complaints/verify-email-otp', { email, otp });
 export const submitComplaint = (data) => API.post('/complaints', data);
-export const checkDuplicateComplaint = (facilityCode, issueCategory) =>
-  API.get('/complaints/check-duplicate', { params: { facilityCode, issueCategory: issueCategory.join(',') } });
 export const uploadComplaintImages = (files) => {
   const formData = new FormData();
   files.forEach((f) => formData.append('images', f));
