@@ -35,17 +35,22 @@ async function autoAssignEngineer(facilityCode) {
             };
         }
 
-        // Find least loaded engineer
+        // Find least loaded engineer (single aggregation instead of N queries)
+        const workloads = await Complaint.aggregate([
+            { $match: {
+                assignedTo: { $in: engineers.map(e => e._id) },
+                status: { $in: ["open", "in_progress"] }
+            }},
+            { $group: { _id: '$assignedTo', count: { $sum: 1 } } }
+        ]);
+        const workloadMap = {};
+        workloads.forEach(w => { workloadMap[w._id.toString()] = w.count; });
+
         let selectedEngineer = null;
         let minimumLoad = Number.MAX_SAFE_INTEGER;
 
         for (const engineer of engineers) {
-
-            const workload = await Complaint.countDocuments({
-                assignedTo: engineer._id,
-                status: { $in: ["open", "in_progress"] }
-            });
-
+            const workload = workloadMap[engineer._id.toString()] || 0;
             if (workload < minimumLoad) {
                 minimumLoad = workload;
                 selectedEngineer = engineer;

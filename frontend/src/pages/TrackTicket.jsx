@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
-import { trackComplaintsByContact } from '../api';
+import { trackComplaintsByContact, trackComplaint } from '../api';
 import Navbar from '../components/Navbar';
 import HomeHeroBanner from '../components/HomeHeroBanner';
 import PublicFooter from '../components/PublicFooter';
 import StatusBadge from '../components/StatusBadge';
 
 export default function TrackTicket() {
-  const [mode, setMode] = useState('email'); // 'email' | 'mobile'
+  const [mode, setMode] = useState('email'); // 'email' | 'mobile' | 'ticketId'
   const [email, setEmail] = useState(localStorage.getItem('trackEmail') || '');
   const [mobile, setMobile] = useState(localStorage.getItem('trackMobile') || '');
+  const [ticketIdInput, setTicketIdInput] = useState('');
   const [complaints, setComplaints] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -26,19 +27,27 @@ export default function TrackTicket() {
     setError('');
     setComplaints([]);
     try {
+      if (mode === 'ticketId') {
+        const tid = (ticketIdInput || '').trim().toUpperCase();
+        if (!tid) { setError('Enter a ticket ID.'); setLoading(false); return; }
+        const res = await trackComplaint(tid);
+        setComplaints(res.data ? [res.data] : []);
+        return;
+      }
+
       const query = {};
       if (mode === 'email') {
         const normalized = (email || '').toLowerCase().trim();
         if (!/\S+@\S+\.\S+/.test(normalized)) {
           setError('Enter a valid email address.');
-          return;
+          setLoading(false); return;
         }
         query.email = normalized;
       } else {
         const normalizedMobile = (mobile || '').trim();
         if (!/^[6-9]\d{9}$/.test(normalizedMobile)) {
           setError('Enter a valid 10-digit mobile number.');
-          return;
+          setLoading(false); return;
         }
         query.mobile = normalizedMobile;
       }
@@ -46,7 +55,11 @@ export default function TrackTicket() {
       const res = await trackComplaintsByContact(query);
       setComplaints(res.data?.complaints || []);
     } catch (e) {
-      setError(e.response?.data?.message || 'Could not fetch tracking details.');
+      if (e.response?.status === 404) {
+        setComplaints([]);
+      } else {
+        setError(e.response?.data?.message || 'Could not fetch tracking details.');
+      }
     } finally {
       setLoading(false);
     }
@@ -72,21 +85,10 @@ export default function TrackTicket() {
 
           <div className="card mb-3">
             <div className="card-body">
-              <div className="flex gap-2 mb-3" style={{ flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className={`btn ${mode === 'email' ? 'btn-primary' : 'btn-ghost'}`}
-                  onClick={() => setMode('email')}
-                >
-                  Track by Email
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${mode === 'mobile' ? 'btn-primary' : 'btn-ghost'}`}
-                  onClick={() => setMode('mobile')}
-                >
-                  Track by Mobile
-                </button>
+              <div className="track-tabs">
+                <button type="button" className={`track-tab ${mode === 'email' ? 'active' : ''}`} onClick={() => setMode('email')}>📧 Track by Email</button>
+                <button type="button" className={`track-tab ${mode === 'mobile' ? 'active' : ''}`} onClick={() => setMode('mobile')}>📱 Track by Mobile</button>
+                <button type="button" className={`track-tab ${mode === 'ticketId' ? 'active' : ''}`} onClick={() => setMode('ticketId')}>🎫 Track by Ticket ID</button>
               </div>
 
               {mode === 'email' ? (
@@ -112,7 +114,7 @@ export default function TrackTicket() {
                     {loading ? <span className="spinner" /> : '🔍 Search'}
                   </button>
                 </div>
-              ) : (
+              ) : mode === 'mobile' ? (
                 <div className="flex gap-2 track-search-row" style={{ alignItems: 'center' }}>
                   <input
                     className="form-control"
@@ -135,17 +137,58 @@ export default function TrackTicket() {
                     {loading ? <span className="spinner" /> : '🔍 Search'}
                   </button>
                 </div>
+              ) : (
+                <div className="flex gap-2 track-search-row" style={{ alignItems: 'center' }}>
+                  <input
+                    className="form-control"
+                    placeholder="e.g. JH-2501-00001"
+                    value={ticketIdInput}
+                    onChange={e => setTicketIdInput(e.target.value.toUpperCase())}
+                    onKeyDown={e => e.key === 'Enter' && search()}
+                    style={{ fontFamily: 'var(--mono)', letterSpacing: '0.05em' }}
+                  />
+                  <button
+                    className="btn btn-primary"
+                    onClick={search}
+                    disabled={loading}
+                    style={{ flexShrink: 0 }}
+                  >
+                    {loading ? <span className="spinner" /> : '🔍 Search'}
+                  </button>
+                </div>
               )}
               {error && <div className="alert alert-error mt-2">{error}</div>}
             </div>
           </div>
 
-          {complaints.length === 0 && !loading ? (
+          {loading ? (
+            <div className="card mb-3">
+              <div className="card-header">
+                <div className="skel" style={{ width: 180, height: 20, marginBottom: 8 }} />
+                <div className="skel" style={{ width: 100, height: 24, borderRadius: 12 }} />
+              </div>
+              <div className="card-body">
+                <div className="grid-2">
+                  {[...Array(4)].map((_, i) => (
+                    <div key={i}>
+                      <div className="skel" style={{ width: 80, height: 12, marginBottom: 6 }} />
+                      <div className="skel" style={{ width: 140, height: 16 }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : complaints.length === 0 ? (
             <div className="text-center text-muted" style={{ padding: '18px 0' }}>
               No complaints found for the provided contact.
             </div>
           ) : (
-            complaints.map((complaint) => (
+            <div className="mb-3 text-sm" style={{ color: 'var(--gray-500)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>Found <strong style={{ color: 'var(--primary)' }}>{complaints.length}</strong> complaint{complaints.length !== 1 ? 's' : ''}</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => window.print()}>🖨️ Print</button>
+            </div>
+          )}
+          <div className="fade-in-results">{!loading && complaints.length > 0 && complaints.map((complaint) => (
               <div key={complaint._id || complaint.ticketId} className="card mb-3">
                 <div className="card-header">
                   <div>
@@ -203,10 +246,32 @@ export default function TrackTicket() {
                       <div><strong>Resolution Notes:</strong><br />{complaint.resolutionNotes}</div>
                     </div>
                   )}
+                  {complaint.activityLog && complaint.activityLog.length > 0 && (
+                    <div className="mt-3" style={{ borderTop: '1px solid var(--gray-200)', paddingTop: 12 }}>
+                      <div className="text-xs text-muted font-semibold" style={{ textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                        Timeline
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                        {complaint.activityLog.map((entry, i) => (
+                          <div key={i} style={{ display: 'flex', gap: 10, padding: '6px 0', borderBottom: i < complaint.activityLog.length - 1 ? '1px solid var(--gray-100)' : 'none' }}>
+                            <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--primary)', marginTop: 6, flexShrink: 0 }} />
+                            <div style={{ flex: 1 }}>
+                              <div className="text-sm font-semibold" style={{ color: 'var(--gray-700)' }}>{entry.action}</div>
+                              <div className="text-xs text-muted">
+                                {entry.performedBy && <span>{entry.performedBy} &middot; </span>}
+                                {entry.timestamp ? fmt(entry.timestamp) : ''}
+                              </div>
+                              {entry.notes && <div className="text-xs text-muted" style={{ marginTop: 2 }}>{entry.notes}</div>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
-            ))
-          )}
+            ))}
+          </div>
         </div>
       </div>
       </div>

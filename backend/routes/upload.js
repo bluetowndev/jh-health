@@ -35,18 +35,16 @@ router.post('/', upload.array('images', 2), async (req, res) => {
       return res.status(400).json({ message: 'No images provided' });
     }
 
-    const urls = [];
-    for (const file of req.files) {
-      const result = await new Promise((resolve, reject) => {
+    const uploadResults = await Promise.all(req.files.map(file =>
+      new Promise((resolve, reject) => {
         const uploadStream = cloudinary.uploader.upload_stream(
           { folder: 'complaint-attachments' },
           (err, result) => (err ? reject(err) : resolve(result))
         );
-        const readStream = Readable.from(file.buffer);
-        readStream.pipe(uploadStream);
-      });
-      urls.push(result.secure_url);
-    }
+        Readable.from(file.buffer).pipe(uploadStream);
+      })
+    ));
+    const urls = uploadResults.map(r => r.secure_url);
 
     res.json({ urls });
   } catch (err) {

@@ -35,7 +35,7 @@ const complaintSchema = new mongoose.Schema({
       message: 'Invalid issue category: {VALUE}'
     }
   },
-  issueDescription: { type: String, trim: true },
+  issueDescription: { type: String, trim: true, maxlength: 2000 },
   attachmentUrls: [{ type: String }], // Optional images (screenshots, etc.) - max 2
 
   // Ticket management
@@ -54,9 +54,10 @@ const complaintSchema = new mongoose.Schema({
   // Engineer assignment
   assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   assignedAt: { type: Date },
+  acceptedAt: { type: Date },
 
   // Resolution details
-  resolutionNotes: { type: String, trim: true },
+  resolutionNotes: { type: String, trim: true, maxlength: 2000 },
   resolvedAt: { type: Date },
   closedAt: { type: Date },
 
@@ -75,14 +76,23 @@ const complaintSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
+complaintSchema.index({ email: 1 });
+complaintSchema.index({ mobile: 1 });
+complaintSchema.index({ status: 1, district: 1, createdAt: -1 });
+complaintSchema.index({ assignedTo: 1, status: 1 });
+complaintSchema.index({ createdAt: -1 });
+complaintSchema.index({ ticketId: 1 });
+complaintSchema.index({ facilityName: 1 });
+complaintSchema.index({ userName: 1 });
+
 // Auto-generate ticket ID before save
-complaintSchema.pre('save', async function(next) {
+complaintSchema.pre('save', function(next) {
   if (!this.ticketId) {
-    const count = await mongoose.model('Complaint').countDocuments();
     const date = new Date();
     const year = date.getFullYear().toString().slice(-2);
     const month = String(date.getMonth() + 1).padStart(2, '0');
-    this.ticketId = `JH-${year}${month}-${String(count + 1).padStart(5, '0')}`;
+    const seq = String(Math.floor(Math.random() * 90000) + 10000);
+    this.ticketId = `JH-${year}${month}-${seq}`;
   }
   next();
 });

@@ -1732,7 +1732,7 @@ const facilities = [
     "facility_type": "PHC",
     "Lat ": 22.95114,
     "longitude": 86.33395,
-    "facility_code": "JHMEDESB001_GW1"
+    "facility_code": "JHPHCESB043_GW1"
   },
   {
     "sno": 668,
@@ -1741,7 +1741,7 @@ const facilities = [
     "facility_type": "PHC",
     "Lat ": 22.95114,
     "longitude": 86.33395,
-    "facility_code": "JHMEDESB001_GW1"
+    "facility_code": "JHPHCESB044_GW1"
   },
   {
     "sno": 191,
@@ -6034,30 +6034,32 @@ async function seed() {
   console.log('Connected to MongoDB');
 
   // Create default admin
+  const adminPwd = process.env.SEED_ADMIN_PASSWORD || 'Admin@1234';
   const adminExists = await User.findOne({ email: 'admin@jhhealthwifi.gov.in' });
   if (!adminExists) {
     await User.create({
       name: 'System Admin',
       email: 'admin@jhhealthwifi.gov.in',
-      password: 'Admin@1234',
+      password: adminPwd,
       role: 'admin'
     });
-    console.log('✅ Admin user created: admin@jhhealthwifi.gov.in / Admin@1234');
+    console.log(`✅ Admin user created: admin@jhhealthwifi.gov.in / ${adminPwd}`);
   } else {
     console.log('ℹ️  Admin already exists');
   }
 
   // Create sample engineer
+  const engPwd = process.env.SEED_ENGINEER_PASSWORD || 'Eng@1234';
   const engExists = await User.findOne({ email: 'engineer1@jhhealthwifi.gov.in' });
   if (!engExists) {
     await User.create({
       name: 'Rajesh Kumar',
       email: 'engineer1@jhhealthwifi.gov.in',
-      password: 'Eng@1234',
+      password: engPwd,
       role: 'engineer',
       assignedDistricts: ['Bokaro', 'Dhanbad']
     });
-    console.log('✅ Engineer created: engineer1@jhhealthwifi.gov.in / Eng@1234');
+    console.log(`✅ Engineer created: engineer1@jhhealthwifi.gov.in / ${engPwd}`);
   }
 
   // Seed facilities

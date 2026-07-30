@@ -1,10 +1,12 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const Complaint = require('../models/Complaint');
+const VerificationCode = require('../models/VerificationCode');
 const NotificationDirectory = require('../models/NotificationDirectory');
 const assignmentService = require('../services/assignmentService');
 const notificationService = require('../services/notificationService');
 const Facility = require('../models/Facility');
+const User = require('../models/User');
 const { protect, requireRole } = require('../middleware/auth');
 const { sendOTPEmail } = require('../utils/email');
 
@@ -14,25 +16,8 @@ const OTP_EXPIRY_MINUTES = 15;
 const EMAIL_VERIFIED_EXPIRY_MS = 30 * 60 * 1000; // 30 min
 const DUPLICATE_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-// In-memory store: email -> { otpHash, expiry } for registration OTP
-const registrationOTPStore = new Map();
-// In-memory store: email -> { verifiedAt } for verified emails (one-time use on submit)
-const verifiedEmailStore = new Map();
-
 function generateOTP() {
   return String(Math.floor(100000 + Math.random() * 900000));
-  
-}
-
-
-function cleanupExpiredOTP() {
-  const now = new Date();
-  for (const [email, data] of registrationOTPStore.entries()) {
-    if (now > data.expiry) registrationOTPStore.delete(email);
-  }
-  for (const [email, data] of verifiedEmailStore.entries()) {
-    if (Date.now() - data.verifiedAt > EMAIL_VERIFIED_EXPIRY_MS) verifiedEmailStore.delete(email);
-  }
 }
 
 // POST /api/complaints/send-email-otp - Public (send OTP to verify email)
@@ -44,18 +29,18 @@ router.post('/send-email-otp', async (req, res) => {
       return res.status(400).json({ message: 'Valid email address is required' });
     }
 
-    cleanupExpiredOTP();
+    await VerificationCode.deleteMany({ email: normalized, type: 'registration' });
     const otpCode = generateOTP();
     const otpHash = await bcrypt.hash(otpCode, 10);
     const expiry = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
-    registrationOTPStore.set(normalized, { otpHash, expiry });
+    await VerificationCode.create({ email: normalized, otpHash, expiry, type: 'registration' });
 
     try {
       const { sendRegistrationOTPEmail } = require('../utils/email');
       await sendRegistrationOTPEmail(normalized, otpCode);
     } catch (emailErr) {
       console.error('Registration OTP email failed:', emailErr);
-      registrationOTPStore.delete(normalized);
+      await VerificationCode.deleteMany({ email: normalized, type: 'registration' });
       return res.status(500).json({
         message: 'Failed to send OTP. Please check your email address and try again.',
         error: emailErr.message
@@ -77,215 +62,100 @@ router.post('/verify-email-otp', async (req, res) => {
       return res.status(400).json({ message: 'Email and 6-digit OTP are required' });
     }
 
-    const data = registrationOTPStore.get(normalized);
-    if (!data) {
+    const record = await VerificationCode.findOne({ email: normalized, type: 'registration', verifiedAt: null });
+    if (!record) {
       return res.status(400).json({ message: 'No OTP found for this email. Please request a new OTP.' });
     }
-    if (new Date() > data.expiry) {
-      registrationOTPStore.delete(normalized);
+    if (new Date() > record.expiry) {
+      await VerificationCode.deleteOne({ _id: record._id });
       return res.status(400).json({ message: 'OTP expired. Please request a new OTP.' });
     }
-    const valid = await bcrypt.compare(otp.trim(), data.otpHash);
+    const valid = await bcrypt.compare(otp.trim(), record.otpHash);
     if (!valid) {
       return res.status(400).json({ message: 'Invalid OTP. Please check the code and try again.' });
     }
 
-    registrationOTPStore.delete(normalized);
-    verifiedEmailStore.set(normalized, { verifiedAt: Date.now() });
+    await VerificationCode.deleteOne({ _id: record._id });
+    await VerificationCode.create({ email: normalized, otpHash: 'verified', expiry: new Date(Date.now() + EMAIL_VERIFIED_EXPIRY_MS), type: 'registration', verifiedAt: new Date() });
     res.json({ message: 'Email verified successfully' });
   } catch (err) {
     res.status(500).json({ message: 'Error verifying OTP', error: err.message });
   }
 });
 
-// GET /api/complaints/check-duplicate - Public, read-only pre-check (no complaint is created)
-// Used by the frontend right after Issue selection, before OTP/contact details/submit.
-router.get('/check-duplicate', async (req, res) => {
-  try {
-    const { facilityCode, issueCategory } = req.query;
-
-    if (!facilityCode) {
-      return res.status(400).json({ message: 'facilityCode is required' });
-    }
-
-    const issueList = Array.isArray(issueCategory)
-      ? issueCategory
-      : String(issueCategory || '').split(',').map(s => s.trim()).filter(Boolean);
-
-    if (issueList.length === 0) {
-      return res.status(400).json({ message: 'issueCategory is required' });
-    }
-
-    const duplicateWindowStart = new Date(Date.now() - DUPLICATE_WINDOW_MS);
-
-    const existingComplaint = await Complaint.findOne({
-      facilityCode,
-      issueCategory: { $in: issueList },
-      status: { $in: ['open', 'in_progress'] },
-      createdAt: { $gte: duplicateWindowStart }
-    }).sort({ createdAt: -1 });
-
-    if (existingComplaint) {
-      return res.json({
-        duplicate: true,
-        ticketId: existingComplaint.ticketId,
-        message: 'A complaint for this facility and issue is already registered.'
-      });
-    }
-
-    res.json({ duplicate: false });
-  } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
-  }
-});
-
 // POST /api/complaints - Public (end user submits)
 router.post('/', async (req, res) => {
-  try {
-    const { userName, mobile, email, district, facilityType, facilityName, facilityCode, issueCategory, issueDescription, attachmentUrls } = req.body;
-    const normalizedEmail = (email || '').toLowerCase().trim();
+  const MAX_RETRIES = 2;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const { userName, mobile, email, district, facilityType, facilityName, facilityCode, issueCategory, issueDescription, attachmentUrls } = req.body;
+      const normalizedEmail = (email || '').toLowerCase().trim();
 
-    // Require email verification before accepting complaint
-    const verified = verifiedEmailStore.get(normalizedEmail);
-    if (!verified) {
-      return res.status(400).json({ message: 'Please verify your email with OTP before submitting the complaint.' });
+      const verifiedRecord = await VerificationCode.findOne({ email: normalizedEmail, type: 'registration', verifiedAt: { $ne: null } });
+      if (!verifiedRecord) {
+        return res.status(400).json({ message: 'Please verify your email with OTP before submitting the complaint.' });
+      }
+      if (Date.now() - new Date(verifiedRecord.verifiedAt).getTime() > EMAIL_VERIFIED_EXPIRY_MS) {
+        await VerificationCode.deleteOne({ _id: verifiedRecord._id });
+        return res.status(400).json({ message: 'Email verification expired. Please verify your email again.' });
+      }
+      await VerificationCode.deleteOne({ _id: verifiedRecord._id });
+
+      const issueList = Array.isArray(issueCategory) ? issueCategory : [issueCategory];
+
+      // Duplicate detection (24h window, same facilityCode)
+      const dupWindowStart = new Date(Date.now() - DUPLICATE_WINDOW_MS);
+      const existingDup = await Complaint.findOne({ facilityCode, createdAt: { $gte: dupWindowStart } }).sort({ createdAt: -1 });
+      if (existingDup) {
+        const blockUntil = new Date(existingDup.createdAt.getTime() + DUPLICATE_WINDOW_MS);
+        const hoursLeft = Math.ceil((blockUntil - Date.now()) / 3600000);
+        return res.status(409).json({
+          duplicate: true, ticketId: existingDup.ticketId, status: existingDup.status,
+          facilityName: existingDup.facilityName, district: existingDup.district,
+          message: `A complaint for this facility was already registered. Please wait approximately ${Math.max(hoursLeft, 1)} hour${Math.max(hoursLeft, 1) !== 1 ? 's' : ''} before submitting a new one.`
+        });
+      }
+
+      const assignment = await assignmentService.autoAssignEngineer(facilityCode);
+      const assignedEngineer = assignment.engineer?._id || null;
+      const assignedAt = assignment.engineer ? new Date() : null;
+
+      const complaint = await Complaint.create({
+        userName, mobile, email, district, facilityType, facilityName, facilityCode,
+        issueCategory: issueList, issueDescription,
+        attachmentUrls: Array.isArray(attachmentUrls) ? attachmentUrls.slice(0, 2) : [],
+        assignedTo: assignedEngineer, assignedAt, status: 'open',
+        activityLog: [
+          { action: 'Complaint Registered', performedBy: userName, performedByRole: 'user', notes: `Issue(s): ${issueList.join(', ')}` },
+          { action: assignment.engineer ? 'Complaint Assigned' : 'Assignment Pending', performedBy: 'System', performedByRole: 'system',
+            notes: assignment.engineer ? `Automatically assigned to ${assignment.engineer.name}\nDistrict : ${assignment.district}` : assignment.message }
+        ]
+      });
+
+      const { summaryEmailSent, stakeholderEmailSent } = await notificationService.notifyAssigned(complaint, assignment.engineer);
+
+      return res.status(201).json({
+        message: 'Complaint registered successfully', ticketId: complaint.ticketId, complaintId: complaint._id,
+        summaryEmailSent, stakeholderEmailSent
+      });
+    } catch (err) {
+      if (err.code === 11000 && err.keyPattern?.ticketId && attempt < MAX_RETRIES) {
+        continue; // Retry with new random ticketId
+      }
+      console.error('Submit complaint error:', err);
+      return res.status(400).json({ message: 'Error submitting complaint', error: err.message });
     }
-    if (Date.now() - verified.verifiedAt > EMAIL_VERIFIED_EXPIRY_MS) {
-      verifiedEmailStore.delete(normalizedEmail);
-      return res.status(400).json({ message: 'Email verification expired. Please verify your email again.' });
-    }
-    verifiedEmailStore.delete(normalizedEmail); // One-time use
-
-    const issueList = Array.isArray(issueCategory)
-      ? issueCategory
-      : [issueCategory];
-
-    // ==========================
-    // FEATURE 2: DUPLICATE COMPLAINT DETECTION
-    // Same facilityCode + overlapping issueCategory + status open/in_progress
-    // + created within last 24 hours => block duplicate
-    // ==========================
-
-    const duplicateWindowStart = new Date(Date.now() - DUPLICATE_WINDOW_MS);
-
-    const existingComplaint = await Complaint.findOne({
-      facilityCode,
-      issueCategory: { $in: issueList },
-      status: { $in: ['open', 'in_progress'] },
-      createdAt: { $gte: duplicateWindowStart }
-    }).sort({ createdAt: -1 });
-
-    if (existingComplaint) {
-        return res.status(200).json({
-      duplicate: true,
-      ticketId: existingComplaint.ticketId,
-      status: existingComplaint.status,
-      facilityName: existingComplaint.facilityName,
-      district: existingComplaint.district,
-      message: "Complaint already registered from this facility."
-  });
-}
-
-    // ==========================
-    // AUTO ASSIGN ENGINEER
-    // ==========================
-
-    const assignment = await assignmentService.autoAssignEngineer(facilityCode);
-
-    let assignedEngineer = null;
-    let assignedAt = null;
-    // IMPORTANT: status ALWAYS starts as "open", even when auto-assigned.
-    // It only moves to "in_progress" when the engineer accepts the ticket.
-    const complaintStatus = "open";
-
-    if (assignment.engineer) {
-      assignedEngineer = assignment.engineer._id;
-      assignedAt = new Date();
-    }
-
-    // ==========================
-    // CREATE COMPLAINT
-    // ==========================
-
-    const complaint = await Complaint.create({
-
-      userName,
-      mobile,
-      email,
-
-      district,
-
-      facilityType,
-
-      facilityName,
-
-      facilityCode,
-
-      issueCategory: issueList,
-
-      issueDescription,
-
-      attachmentUrls: Array.isArray(attachmentUrls)
-        ? attachmentUrls.slice(0, 2)
-        : [],
-
-      assignedTo: assignedEngineer,
-
-      assignedAt,
-
-      status: complaintStatus,
-
-      activityLog: [
-
-        {
-          action: "Complaint Registered",
-          performedBy: userName,
-          performedByRole: "user",
-          notes: `Issue(s): ${issueList.join(", ")}`
-        },
-
-        {
-          action: assignment.engineer
-            ? "Complaint Assigned"
-            : "Assignment Pending",
-
-          performedBy: "System",
-
-          performedByRole: "system",
-
-          notes: assignment.engineer
-            ? `Automatically assigned to ${assignment.engineer.name}\nDistrict : ${assignment.district}`
-            : assignment.message
-        }
-
-      ]
-
-    });
-
-    // ==========================
-    // FEATURE 3: Assigned notification (customer summary + stakeholder alert)
-    // ==========================
-    const { summaryEmailSent, stakeholderEmailSent } = await notificationService.notifyAssigned(
-      complaint,
-      assignment.engineer
-    );
-
-    res.status(201).json({
-      message: 'Complaint registered successfully',
-      ticketId: complaint.ticketId,
-      complaintId: complaint._id,
-      summaryEmailSent,
-      stakeholderEmailSent
-    });
-  } catch (err) {
-    res.status(400).json({ message: 'Error submitting complaint', error: err.message });
   }
+  res.status(500).json({ message: 'Failed to generate unique ticket ID after retries' });
 });
 
 // GET /api/complaints/track - Public (track complaints by email/mobile; no ticket id in URL)
 router.get('/track', async (req, res) => {
   try {
-    const { email, mobile, limit = 20, page = 1 } = req.query;
+    const { email, mobile } = req.query;
+    let { limit = 20, page = 1 } = req.query;
+    limit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+    page = Math.max(Number(page) || 1, 1);
     const filter = {};
 
     if (email) {
@@ -351,25 +221,52 @@ router.get('/track/:ticketId', async (req, res) => {
 // GET /api/complaints - Admin: all, Engineer: only assigned complaints
 router.get('/', protect, async (req, res) => {
   try {
-    const { status, district, facilityType, page = 1, limit = 20 } = req.query;
+    const { status, district, facilityType, priority, engineer, startDate, endDate, issueCategory, search, sort } = req.query;
+    let { page = 1, limit = 20 } = req.query;
+    limit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+    page = Math.max(Number(page) || 1, 1);
 
     const filter = {};
 
-    // Engineer can only see complaints assigned to them
+    // Engineer can only see complaints assigned to them within their districts
     if (req.user.role === "engineer") {
       filter.assignedTo = req.user._id;
+      if (req.user.assignedDistricts && req.user.assignedDistricts.length > 0) {
+        filter.district = { $in: req.user.assignedDistricts };
+      }
     }
 
     // Optional filters
     if (status) filter.status = status;
     if (district) filter.district = district;
     if (facilityType) filter.facilityType = facilityType;
+    if (priority) filter.priority = priority;
+    if (engineer) filter.assignedTo = engineer;
+    if (issueCategory) filter.issueCategory = { $in: issueCategory.split(',') };
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+    if (search) {
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = [
+        { ticketId: { $regex: escaped, $options: 'i' } },
+        { district: { $regex: escaped, $options: 'i' } },
+        { facilityName: { $regex: escaped, $options: 'i' } },
+        { userName: { $regex: escaped, $options: 'i' } }
+      ];
+    }
 
     const total = await Complaint.countDocuments(filter);
 
+    let sortObj = { createdAt: -1 };
+    if (sort === 'oldest') sortObj = { createdAt: 1 };
+    else if (sort === 'priority') sortObj = { priority: -1, createdAt: -1 };
+
     const complaints = await Complaint.find(filter)
       .populate("assignedTo", "name email")
-      .sort({ createdAt: -1 })
+      .sort(sortObj)
       .skip((Number(page) - 1) * Number(limit))
       .limit(Number(limit));
 
@@ -388,16 +285,87 @@ router.get('/', protect, async (req, res) => {
   }
 });
 
+// GET /api/complaints/engineer-stats - Engineer dashboard stats
+router.get('/engineer-stats', protect, requireRole('engineer'), async (req, res) => {
+  try {
+    const match = { assignedTo: req.user._id };
+    if (req.user.assignedDistricts && req.user.assignedDistricts.length > 0) {
+      match.district = { $in: req.user.assignedDistricts };
+    }
+
+    const weekStart = new Date(); weekStart.setDate(weekStart.getDate() - weekStart.getDay()); weekStart.setHours(0,0,0,0);
+    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0);
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+
+    const [statusStats, resolvedWeek, resolvedMonth, resolvedToday, avgTime] = await Promise.all([
+      Complaint.aggregate([{ $match: match }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
+      Complaint.countDocuments({ ...match, status: 'resolved', resolvedAt: { $gte: weekStart } }),
+      Complaint.countDocuments({ ...match, status: 'resolved', resolvedAt: { $gte: monthStart } }),
+      Complaint.countDocuments({ ...match, status: 'resolved', resolvedAt: { $gte: todayStart } }),
+      Complaint.aggregate([
+        { $match: { ...match, status: 'resolved', resolvedAt: { $ne: null } } },
+        { $project: { diff: { $subtract: ['$resolvedAt', '$createdAt'] } } },
+        { $group: { _id: null, avgMs: { $avg: '$diff' } } }
+      ])
+    ]);
+
+    const total = await Complaint.countDocuments(match);
+
+    const stats = { open: 0, in_progress: 0, resolved: 0, closed: 0 };
+    statusStats.forEach(s => { stats[s._id] = s.count; });
+
+    res.json({
+      total,
+      ...stats,
+      resolvedWeek, resolvedMonth, resolvedToday,
+      avgResolutionHours: avgTime.length > 0 ? Math.round(avgTime[0].avgMs / 3600000) : 0
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
 // GET /api/complaints/stats - Admin dashboard stats
 router.get('/stats', protect, requireRole('admin'), async (req, res) => {
   try {
-    const [statusStats, districtStats, categoryStats] = await Promise.all([
+    const [
+      statusStats,
+      districtStats,
+      categoryStats,
+      monthlyStats,
+      engineerCount,
+      activeEngineerCount,
+      resolvedTodayCount
+    ] = await Promise.all([
       Complaint.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
       Complaint.aggregate([{ $group: { _id: '$district', count: { $sum: 1 } } }, { $sort: { count: -1 } }, { $limit: 10 }]),
-      Complaint.aggregate([{ $group: { _id: '$issueCategory', count: { $sum: 1 } } }, { $sort: { count: -1 } }])
+      Complaint.aggregate([{ $group: { _id: '$issueCategory', count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
+      Complaint.aggregate([
+        { $group: {
+            _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } },
+            count: { $sum: 1 }
+        }},
+        { $sort: { '_id.year': 1, '_id.month': 1 } },
+        { $limit: 12 }
+      ]),
+      User.countDocuments({ role: 'engineer' }),
+      User.countDocuments({ role: 'engineer', isActive: true }),
+      Complaint.countDocuments({
+        status: 'resolved',
+        resolvedAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) }
+      })
     ]);
     const total = await Complaint.countDocuments();
-    res.json({ total, statusStats, districtStats, categoryStats });
+    res.json({
+      total,
+      statusStats,
+      districtStats,
+      categoryStats,
+      monthlyStats,
+      engineerCount,
+      activeEngineerCount,
+      resolvedTodayCount
+    });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }

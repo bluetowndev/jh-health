@@ -649,6 +649,8 @@ export default function Home() {
                       placeholder="your@email.com"
                       value={form.email}
                       onChange={e => set('email', e.target.value)}
+                      autoComplete="email"
+                      inputMode="email"
                       style={{ flex: '1 1 200px' }}
                       disabled={emailVerified}
                     />
@@ -713,21 +715,22 @@ export default function Home() {
                   ))}
                 </div>
                 <div className="form-group mt-3">
-                  <label className="form-label">Additional Details (Optional)</label>
-                  <textarea className="form-control" rows={3} placeholder="Describe the issue in more detail..." value={form.issueDescription} onChange={e => set('issueDescription', e.target.value)} style={{ resize: 'vertical' }} />
+                  <label className="form-label">Additional Details <span className="text-muted" style={{ fontWeight: 400 }}>(Optional)</span></label>
+                  <textarea className="form-control" rows={3} placeholder="Describe the issue in more detail..." maxLength={500} value={form.issueDescription} onChange={e => set('issueDescription', e.target.value)} style={{ resize: 'vertical' }} />
+                  <div className="char-counter">{form.issueDescription.length}/500</div>
                 </div>
                 <div className="form-group mt-3">
-                  <label className="form-label">Attach Images (Optional, max 2)</label>
-                  <p className="text-sm text-muted mb-2">Screenshots or photos of the issue – JPEG, PNG, GIF, WebP up to 5MB each</p>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' }}>
+                  <label className="form-label">Attach Images <span className="text-muted" style={{ fontWeight: 400 }}>(Optional, max 2)</span></label>
+                  <p className="text-sm text-muted mb-2">Screenshots or photos of the issue</p>
+                  <div className="image-upload-row">
                     {(form.attachmentUrls || []).map((url, i) => (
-                      <div key={i} style={{ position: 'relative', flex: '0 0 auto' }}>
-                        <img src={url} alt={`Attachment ${i + 1}`} style={{ width: 100, height: 100, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--gray-200)' }} />
-                        <button type="button" onClick={() => removeImage(i)} className="btn btn-ghost btn-sm" style={{ position: 'absolute', top: -4, right: -4, padding: 4, minWidth: 0, background: 'var(--gray-100)', borderRadius: '50%' }} aria-label="Remove">×</button>
+                      <div key={i} className="image-upload-preview">
+                        <img src={url} alt={`Attachment ${i + 1}`} />
+                        <button type="button" onClick={() => removeImage(i)} className="image-upload-remove" aria-label="Remove image">×</button>
                       </div>
                     ))}
                     {(form.attachmentUrls || []).length < 2 && (
-                      <label className="btn btn-outline" style={{ margin: 0, cursor: imageUploading ? 'not-allowed' : 'pointer' }}>
+                      <label className={`image-upload-add ${imageUploading ? 'disabled' : ''}`}>
                         {imageUploading ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Uploading...</> : '📷 Add Image'}
                         <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple style={{ display: 'none' }} onChange={handleImageSelect} disabled={imageUploading} />
                       </label>

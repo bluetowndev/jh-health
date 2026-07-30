@@ -41,8 +41,6 @@ export const saveGlobalNotificationContacts = (data) => API.put('/notifications/
 export const saveFacilityNotificationMapping = (facilityCode, data) => API.put(`/notifications/mappings/${facilityCode}`, data);
 
 // Complaints (public)
-export const checkDuplicateComplaint = (facilityCode, issueCategory) =>
-  API.get('/complaints/check-duplicate', { params: { facilityCode, issueCategory: issueCategory.join(',') } });
 export const sendEmailOTP = (email) => API.post('/complaints/send-email-otp', { email });
 export const verifyEmailOTP = (email, otp) => API.post('/complaints/verify-email-otp', { email, otp });
 export const submitComplaint = (data) => API.post('/complaints', data);
@@ -56,6 +54,7 @@ export const trackComplaint = (ticketId) => API.get(`/complaints/track/${ticketI
 
 // Complaints (protected)
 export const getComplaints = (params) => API.get('/complaints', { params });
+export const getEngineerStats = () => API.get('/complaints/engineer-stats');
 export const getComplaintStats = () => API.get('/complaints/stats');
 export const getComplaintById = (id) => API.get(`/complaints/${id}`);
 export const assignComplaint = (id, engineerId) => API.patch(`/complaints/${id}/assign`, { engineerId });
@@ -67,5 +66,9 @@ export const getUsers = () => API.get('/users');
 export const getEngineers = () => API.get('/users/engineers');
 export const updateUser = (id, data) => API.patch(`/users/${id}`, data);
 export const deleteUser = (id) => API.delete(`/users/${id}`);
+
+// Management Dashboard
+export const getManagementStats = (params) => API.get('/management/stats', { params });
+export const getManagementComplaints = (params) => API.get('/management/complaints', { params });
 
 export default API;

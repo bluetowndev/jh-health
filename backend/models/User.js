@@ -4,8 +4,8 @@ const bcrypt = require('bcryptjs');
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
   email: { type: String, required: true, unique: true, lowercase: true },
-  password: { type: String, required: true },
-  role: { type: String, enum: ['admin', 'engineer'], required: true },
+  password: { type: String, required: true, validate: { validator: v => v.length >= 6, message: 'Password must be at least 6 characters' } },
+  role: { type: String, enum: ['admin', 'engineer', 'management'], required: true },
   // Informational only — engineers see all complaints statewide
   assignedDistricts: [{ type: String }],
   isActive: { type: Boolean, default: true },
