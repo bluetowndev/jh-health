@@ -49,6 +49,7 @@ export const uploadComplaintImages = (files) => {
   files.forEach((f) => formData.append('images', f));
   return API.post('/upload', formData);
 };
+export const checkDuplicateComplaint = (facilityCode, issueCategory) => API.post('/complaints/check-duplicate', { facilityCode, issueCategory });
 export const trackComplaintsByContact = (params) => API.get('/complaints/track', { params });
 export const trackComplaint = (ticketId) => API.get(`/complaints/track/${ticketId}`);
 

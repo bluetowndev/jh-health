@@ -83,6 +83,30 @@ router.post('/verify-email-otp', async (req, res) => {
   }
 });
 
+// POST /api/complaints/check-duplicate - Public (pre-submit duplicate check)
+router.post('/check-duplicate', async (req, res) => {
+  try {
+    const { facilityCode } = req.body;
+    if (!facilityCode) {
+      return res.status(400).json({ message: 'facilityCode is required' });
+    }
+    const dupWindowStart = new Date(Date.now() - DUPLICATE_WINDOW_MS);
+    const existingDup = await Complaint.findOne({ facilityCode, createdAt: { $gte: dupWindowStart } }).sort({ createdAt: -1 });
+    if (existingDup) {
+      const blockUntil = new Date(existingDup.createdAt.getTime() + DUPLICATE_WINDOW_MS);
+      const hoursLeft = Math.ceil((blockUntil - Date.now()) / 3600000);
+      return res.json({
+        duplicate: true, ticketId: existingDup.ticketId, status: existingDup.status,
+        facilityName: existingDup.facilityName, district: existingDup.district,
+        message: `A complaint for this facility was already registered. Please wait approximately ${Math.max(hoursLeft, 1)} hour${Math.max(hoursLeft, 1) !== 1 ? 's' : ''} before submitting a new one.`
+      });
+    }
+    res.json({ duplicate: false });
+  } catch (err) {
+    res.status(500).json({ message: 'Error checking duplicate', error: err.message });
+  }
+});
+
 // POST /api/complaints - Public (end user submits)
 router.post('/', async (req, res) => {
   const MAX_RETRIES = 2;
