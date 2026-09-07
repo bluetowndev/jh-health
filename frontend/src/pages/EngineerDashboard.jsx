@@ -1,17 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getComplaints, getEngineerStats, updateComplaintStatus, acceptTicket } from '../api';
+import { getComplaints, getEngineerStats, updateComplaintStatus, acceptTicket, getDistricts, escapeHtml } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import StatusBadge from '../components/StatusBadge';
+import MaterialIcon from '../components/MaterialIcon';
 import useTheme from '../hooks/useTheme';
-
-const STATUS_COLORS = {
-  open: '#1D4ED8',
-  in_progress: '#B45309',
-  resolved: '#1A7A4A',
-  closed: '#64748B'
-};
+import { useLogoutConfirm } from '../hooks/useLogoutConfirm';
+import { STATUS_COLORS } from '../utils/constants';
+import { fmt, fmtShort, fmtDate } from '../utils/dates';
 
 const PRIORITY_LABELS = { low: 'Low', medium: 'Med', high: 'High', critical: 'Critical' };
 const SORT_OPTIONS = [
@@ -20,15 +17,11 @@ const SORT_OPTIONS = [
   { value: 'priority', label: 'Priority (High→Low)' }
 ];
 
-const fmt = (d) => d ? new Date(d).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
-const fmtShort = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—';
-
-const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-
 export default function EngineerDashboard() {
   const { user, logoutUser } = useAuth();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
+  const { confirmLogout, LogoutConfirmModal } = useLogoutConfirm();
   const [complaints, setComplaints] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -47,25 +40,16 @@ export default function EngineerDashboard() {
   const [expStart, setExpStart] = useState('');
   const [expEnd, setExpEnd] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [districts, setDistricts] = useState([]);
 
-  useEffect(() => {
-    if (!user || user.role !== 'engineer') { navigate('/login'); return; }
-    loadStats();
-    loadComplaints();
-  }, []);
-
-  useEffect(() => {
-    loadComplaints();
-  }, [filter, page]);
-
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     try {
       const r = await getEngineerStats();
       setStats(r.data);
-    } catch { /* silent */ }
-  };
+    } catch { /* Stats load failed — non-critical, dashboard still works */ }
+  }, []);
 
-  const loadComplaints = async () => {
+  const loadComplaints = useCallback(async () => {
     setLoading(true);
     try {
       const params = { page, limit: 12 };
@@ -84,7 +68,25 @@ export default function EngineerDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, filter]);
+
+  useEffect(() => {
+    if (!user || user.role !== 'engineer') { navigate('/login'); return; }
+    loadStats();
+    loadComplaints();
+    getDistricts().then(r => setDistricts(r.data || [])).catch(() => {});
+  }, [loadStats, loadComplaints, user, navigate]);
+
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') {
+        if (showExport && !exporting) setShowExport(false);
+        if (modal) { setModal(false); setAwaitingOtp(false); }
+      }
+    };
+    if (showExport || modal) window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [showExport, modal, exporting]);
 
   const openModal = (c) => {
     setSelected(c);
@@ -168,6 +170,7 @@ export default function EngineerDashboard() {
         content = xml; mime = 'application/vnd.ms-excel'; ext = 'xls';
       } else if (exportFormat === 'pdf') {
         const win = window.open('', '_blank');
+        if (!win) { toast.error('Popup blocked. Please allow popups for this site.'); return; }
         const dateRange = expStart || expEnd ? ` | ${expStart || '…'} to ${expEnd || '…'}` : '';
         win.document.write(`<html><head><title>Engineer Tickets</title>
 <style>body{font-family:Arial,sans-serif;margin:24px;font-size:12px}
@@ -177,12 +180,12 @@ th{background:#0F4C81;color:#fff;padding:7px 5px;text-align:left;font-size:10px}
 td{padding:5px;border-bottom:1px solid #ddd;font-size:10px}
 .footer{margin-top:24px;font-size:11px;color:#999;border-top:1px solid #eee;padding-top:12px}
 </style></head><body>
-<h2>Digital Communication Saathi — Engineer Ticket Report</h2>
-<div class="sub">${user?.name} (${user?.email})${dateRange} | ${data.length} tickets | Generated: ${new Date().toLocaleString('en-IN')}</div>
-<table><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>
-${rows.map(r => `<tr>${r.map(v => `<td>${String(v ?? '')}</td>`).join('')}</tr>`).join('')}
+<h2>Digital Sanchar Sathi — Engineer Ticket Report</h2>
+<div class="sub">${escapeHtml(user?.name || '')} (${escapeHtml(user?.email || '')})${dateRange} | ${data.length} tickets | Generated: ${new Date().toLocaleString('en-IN')}</div>
+<table><thead><tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>
+${rows.map(r => `<tr>${r.map(v => `<td>${escapeHtml(String(v ?? ''))}</td>`).join('')}</tr>`).join('')}
 </tbody></table>
-<div class="footer">Digital Communication Saathi — Jharkhand Health WiFi Complaint Management System</div>
+<div class="footer">Digital Sanchar Sathi — Jharkhand Health WiFi Complaint Management System</div>
 <script>window.onload=function(){window.print()}</script></body></html>`);
         win.document.close();
         setExporting(false); setShowExport(false);
@@ -212,22 +215,20 @@ ${rows.map(r => `<tr>${r.map(v => `<td>${String(v ?? '')}</td>`).join('')}</tr>`
   if (loading && complaints.length === 0 && !stats) {
     return (
       <div>
-        <nav className="navbar">
+        <nav className="navbar glass-navbar">
           <div className="navbar-inner navbar-inner-split">
             <div className="navbar-logo-slot navbar-logo-slot--left">
               <img src="/logos/abdm.png" alt="ABDM" className="navbar-logo-img" />
             </div>
             <div className="navbar-brand-center">
-              <span className="navbar-title">Digital Communication Saathi</span>
+              <span className="navbar-title">डिजिटल संचार साथी</span>
               <span className="navbar-subtitle">Engineer Dashboard</span>
             </div>
             <div className="navbar-logo-slot navbar-logo-slot--right">
-              <button type="button" className="theme-toggle-btn" onClick={toggleTheme}>{theme === 'dark' ? '☀️' : '🌙'}</button>
               <img src="/logos/bsnl.png" alt="BSNL" className="navbar-logo-img" />
               <div className="navbar-actions navbar-actions--compact">
                 <span className="navbar-user navbar-user--compact">{user?.name}</span>
-                <span className="navbar-role navbar-role--compact" style={{ background: 'var(--accent)' }}>Engineer</span>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => { logoutUser(); navigate('/login'); }} style={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)' }}>Logout</button>
+              <span className="navbar-role navbar-role--compact">Engineer</span>
               </div>
             </div>
           </div>
@@ -247,37 +248,44 @@ ${rows.map(r => `<tr>${r.map(v => `<td>${String(v ?? '')}</td>`).join('')}</tr>`
   return (
     <div className="page-wrapper">
       {/* Navbar */}
-      <nav className="navbar">
+      <nav className="navbar glass-navbar">
         <div className="navbar-inner navbar-inner-split">
           <div className="navbar-logo-slot navbar-logo-slot--left">
-            <button className="hamburger-btn" onClick={() => setSidebarOpen(true)} style={{ color: 'white' }}>☰</button>
+            <button className="hamburger-btn" aria-label="Open menu" onClick={() => setSidebarOpen(true)} style={{ color: 'white' }}><MaterialIcon name="menu" size={24} /></button>
             <img src="/logos/abdm.png" alt="ABDM" className="navbar-logo-img" />
           </div>
           <div className="navbar-brand-center">
-            <span className="navbar-title">Digital Communication Saathi</span>
+            <span className="navbar-title">डिजिटल संचार साथी</span>
             <span className="navbar-subtitle">Engineer Dashboard</span>
           </div>
           <div className="navbar-logo-slot navbar-logo-slot--right">
-            <button type="button" className="theme-toggle-btn" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>{theme === 'dark' ? '☀️' : '🌙'}</button>
             <img src="/logos/bsnl.png" alt="BSNL" className="navbar-logo-img" />
             <div className="navbar-actions navbar-actions--compact">
               <span className="navbar-user navbar-user--compact">{user?.name}</span>
-              <span className="navbar-role navbar-role--compact" style={{ background: 'var(--accent)' }}>Engineer</span>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => { logoutUser(); navigate('/login'); }} style={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)' }}>Logout</button>
+              <span className="navbar-role navbar-role--compact">Engineer</span>
             </div>
           </div>
         </div>
       </nav>
 
       {/* Mobile sidebar */}
-      <div className={`sidebar-overlay ${sidebarOpen ? 'open' : ''}`} onClick={() => setSidebarOpen(false)} />
+      <div className={`sidebar-overlay ${sidebarOpen ? 'open' : ''}`} onClick={() => setSidebarOpen(false)} aria-hidden={!sidebarOpen} />
       <aside className={`sidebar-mobile ${sidebarOpen ? 'open' : ''}`}>
-        <div className="sidebar-section">
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--gray-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span className="font-semibold">Menu</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => setSidebarOpen(false)} style={{ padding: '4px 8px' }}><MaterialIcon name="close" size={20} /></button>
+        </div>
+        <div className="sidebar-section" style={{ paddingTop: 16 }}>
           <div className="sidebar-label">Information</div>
-          <div className="sidebar-link"><span>👤</span>{user?.name}</div>
-          <div className="sidebar-link"><span>📍</span>{assignedDistrictInfo}</div>
-          <div className="sidebar-link" onClick={() => { navigate('/'); setSidebarOpen(false); }}><span>🏠</span>Public Portal</div>
-          <div className="sidebar-link" onClick={() => { logoutUser(); navigate('/login'); setSidebarOpen(false); }}><span>🚪</span>Logout</div>
+          <div className="sidebar-link material-nav-item"><span><MaterialIcon name="person" size={20} /></span>{user?.name}</div>
+          <div className="sidebar-link material-nav-item"><span><MaterialIcon name="location_on" size={20} /></span>{assignedDistrictInfo}</div>
+          <div className="sidebar-link material-nav-item" role="link" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') { window.open('/', '_blank'); setSidebarOpen(false); } }} onClick={() => { window.open('/', '_blank'); setSidebarOpen(false); }}><span><MaterialIcon name="home" size={20} /></span>Public Portal</div>
+          <div className="sidebar-link material-nav-item" role="link" tabIndex={0}
+            onClick={toggleTheme}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleTheme(); } }}>
+            <span><MaterialIcon name={theme === 'dark' ? 'light_mode' : 'dark_mode'} size={20} /></span> {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+          </div>
+          <div className="sidebar-link material-nav-item" role="link" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') { confirmLogout(); setSidebarOpen(false); } }} onClick={() => { confirmLogout(); setSidebarOpen(false); }}><span><MaterialIcon name="logout" size={20} /></span>Logout</div>
         </div>
       </aside>
 
@@ -286,9 +294,9 @@ ${rows.map(r => `<tr>${r.map(v => `<td>${String(v ?? '')}</td>`).join('')}</tr>`
         <div className="flex justify-between items-center mb-3" style={{ flexWrap: 'wrap', gap: 8 }}>
           <div>
             <h2>My Tickets</h2>
-            <p className="text-sm text-muted mt-1">{total} complaint{total !== 1 ? 's' : ''} · 📍 {assignedDistrictInfo}</p>
+            <p className="text-sm text-muted mt-1">{total} complaint{total !== 1 ? 's' : ''} · <MaterialIcon name="location_on" size={16} /> {assignedDistrictInfo}</p>
           </div>
-          <button className="btn btn-outline btn-sm" onClick={() => setShowExport(true)}>📥 Export</button>
+          <button className="btn btn-outline btn-sm" onClick={() => setShowExport(true)}><MaterialIcon name="file_download" size={18} /> Export</button>
         </div>
 
         {/* Stats row */}
@@ -345,38 +353,51 @@ ${rows.map(r => `<tr>${r.map(v => `<td>${String(v ?? '')}</td>`).join('')}</tr>`
           </div>
           <div className="engineer-filter-group">
             <label className="form-label">District</label>
-            <input className="form-control" placeholder="Filter district..." value={filter.district}
-              onChange={e => { setFilter(f => ({ ...f, district: e.target.value })); setPage(1); }} />
+            <div className="material-select-wrap">
+              <select className="form-control" value={filter.district}
+                onChange={e => { setFilter(f => ({ ...f, district: e.target.value })); setPage(1); }}>
+                <option value="">All Districts</option>
+                {districts.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
           </div>
           <div className="engineer-filter-group">
             <label className="form-label">Facility Type</label>
-            <select className="form-control" value={filter.facilityType}
-              onChange={e => { setFilter(f => ({ ...f, facilityType: e.target.value })); setPage(1); }}>
-              <option value="">All Types</option>
-              {['DH','SDH','CHC','PHC','UPHC','HSC'].map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <div className="material-select-wrap">
+              <select className="form-control" value={filter.facilityType}
+                onChange={e => { setFilter(f => ({ ...f, facilityType: e.target.value })); setPage(1); }}>
+                <option value="">All Types</option>
+                {['DH','SDH','CHC','PHC','UPHC','HSC'].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
           </div>
           <div className="engineer-filter-group">
             <label className="form-label">From</label>
-            <input type="date" className="form-control" value={filter.startDate}
-              onChange={e => { setFilter(f => ({ ...f, startDate: e.target.value })); setPage(1); }} />
+            <div className="material-date-wrap">
+              <input type="date" className="form-control" value={filter.startDate}
+                onChange={e => { setFilter(f => ({ ...f, startDate: e.target.value })); setPage(1); }} />
+            </div>
           </div>
           <div className="engineer-filter-group">
             <label className="form-label">To</label>
-            <input type="date" className="form-control" value={filter.endDate}
-              onChange={e => { setFilter(f => ({ ...f, endDate: e.target.value })); setPage(1); }} />
+            <div className="material-date-wrap">
+              <input type="date" className="form-control" value={filter.endDate}
+                onChange={e => { setFilter(f => ({ ...f, endDate: e.target.value })); setPage(1); }} />
+            </div>
           </div>
           <div className="engineer-filter-group">
             <label className="form-label">Sort</label>
-            <select className="form-control" value={filter.sort}
-              onChange={e => setFilter(f => ({ ...f, sort: e.target.value }))}>
-              {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            <div className="material-select-wrap">
+              <select className="form-control" value={filter.sort}
+                onChange={e => setFilter(f => ({ ...f, sort: e.target.value }))}>
+                {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
           </div>
           {hasActiveFilters && (
             <div className="engineer-filter-group engineer-filter-clear">
               <label className="form-label">&nbsp;</label>
-              <button className="btn btn-ghost btn-sm" onClick={clearFilters}>✕ Clear</button>
+              <button className="btn btn-ghost btn-sm" onClick={clearFilters}><MaterialIcon name="close" size={16} /> Clear</button>
             </div>
           )}
         </div>
@@ -394,7 +415,7 @@ ${rows.map(r => `<tr>${r.map(v => `<td>${String(v ?? '')}</td>`).join('')}</tr>`
           {!loading && complaints.length === 0 && (
             <div className="card" style={{ gridColumn: '1/-1' }}>
               <div className="empty-state">
-                <div className="empty-icon" style={{ fontSize: '2.5rem' }}>🎉</div>
+                <div className="empty-icon" style={{ fontSize: '2.5rem' }}><MaterialIcon name="assignment" size={48} color="var(--gray-300)" /></div>
                 <div className="empty-title">No tickets found</div>
                 <div className="empty-desc">
                   {hasActiveFilters ? 'Try adjusting your filters' : 'No tickets assigned to you right now'}
@@ -417,7 +438,7 @@ ${rows.map(r => `<tr>${r.map(v => `<td>${String(v ?? '')}</td>`).join('')}</tr>`
               <div className="engineer-ticket-body">
                 <div className="engineer-ticket-name">{c.userName}</div>
                 <div className="engineer-ticket-meta">
-                  <a href={`tel:${c.mobile}`} className="engineer-ticket-phone" onClick={e => e.stopPropagation()}>📞 {c.mobile}</a>
+                  <a href={`tel:${c.mobile}`} className="engineer-ticket-phone" onClick={e => e.stopPropagation()}><MaterialIcon name="phone" size={16} /> {c.mobile}</a>
                 </div>
                 <div className="engineer-ticket-facility">
                   <div className="engineer-ticket-facility-name">{c.facilityName}</div>
@@ -433,12 +454,12 @@ ${rows.map(r => `<tr>${r.map(v => `<td>${String(v ?? '')}</td>`).join('')}</tr>`
               <div className="engineer-ticket-footer">
                 {c.status === 'open' ? (
                   <button className="btn btn-success btn-sm btn-block" onClick={() => handleAccept(c)} disabled={acceptingId === c._id}>
-                    {acceptingId === c._id ? <span className="spinner" /> : '✓ Accept Ticket'}
+                    {acceptingId === c._id ? <span className="spinner" /> : <><MaterialIcon name="check" size={16} /> Accept Ticket</>}
                   </button>
                 ) : c.status === 'closed' || c.status === 'resolved' ? (
                   <div className="flex justify-between items-center" style={{ width: '100%' }}>
                     <span className="text-xs text-muted">
-                      {c.status === 'resolved' ? '✅ Resolved' : '📦 Closed'} {c.resolvedAt && fmtShort(c.resolvedAt)}
+                      {c.status === 'resolved' ? <><MaterialIcon name="check_circle" size={16} /> Resolved</> : <><MaterialIcon name="inventory_2" size={16} /> Closed</>} {c.resolvedAt && fmtShort(c.resolvedAt)}
                     </span>
                     <button className="btn btn-ghost btn-sm" onClick={() => openModal(c)}>View</button>
                   </div>
@@ -466,11 +487,11 @@ ${rows.map(r => `<tr>${r.map(v => `<td>${String(v ?? '')}</td>`).join('')}</tr>`
 
       {/* Export Modal */}
       {showExport && (
-        <div className="modal-overlay" onClick={() => { if (!exporting) setShowExport(false); }}>
+        <div className="modal-overlay" role="dialog" aria-modal="true" onClick={() => { if (!exporting) setShowExport(false); }}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
             <div className="modal-header">
-              <h3>📥 Export Tickets</h3>
-              <button className="btn btn-ghost btn-sm" onClick={() => setShowExport(false)} disabled={exporting}>✕</button>
+              <h3><MaterialIcon name="file_download" size={20} /> Export Tickets</h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowExport(false)} disabled={exporting}><MaterialIcon name="close" size={16} /></button>
             </div>
             <div className="modal-body">
               <div className="form-group">
@@ -488,8 +509,8 @@ ${rows.map(r => `<tr>${r.map(v => `<td>${String(v ?? '')}</td>`).join('')}</tr>`
               <div className="form-group">
                 <label className="form-label">Date Range (optional)</label>
                 <div className="flex gap-2">
-                  <input type="date" className="form-control" value={expStart} onChange={e => setExpStart(e.target.value)} disabled={exporting} placeholder="From" />
-                  <input type="date" className="form-control" value={expEnd} onChange={e => setExpEnd(e.target.value)} disabled={exporting} placeholder="To" />
+                  <div className="material-date-wrap"><input type="date" className="form-control" value={expStart} onChange={e => setExpStart(e.target.value)} disabled={exporting} placeholder="From" /></div>
+                  <div className="material-date-wrap"><input type="date" className="form-control" value={expEnd} onChange={e => setExpEnd(e.target.value)} disabled={exporting} placeholder="To" /></div>
                 </div>
                 <span className="text-xs text-muted" style={{ marginTop: 4, display: 'block' }}>Leave blank to export all assigned tickets</span>
               </div>
@@ -506,14 +527,14 @@ ${rows.map(r => `<tr>${r.map(v => `<td>${String(v ?? '')}</td>`).join('')}</tr>`
 
       {/* Update Modal */}
       {modal && selected && (
-        <div className="modal-overlay" onClick={() => setModal(false)}>
+        <div className="modal-overlay" role="dialog" aria-modal="true" onClick={() => setModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <div>
-                <h3>Update Ticket</h3>
+                <h3>{selected.status === 'resolved' || selected.status === 'closed' ? 'View Ticket' : 'Update Ticket'}</h3>
                 <div style={{ fontFamily: 'var(--mono)', fontSize: '0.8rem', color: 'var(--primary)', marginTop: 2 }}>{selected.ticketId}</div>
               </div>
-              <button className="btn btn-ghost btn-sm" onClick={() => setModal(false)}>✕</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setModal(false)}><MaterialIcon name="close" size={16} /></button>
             </div>
             <div className="modal-body">
               {/* Complaint info */}
@@ -521,7 +542,7 @@ ${rows.map(r => `<tr>${r.map(v => `<td>${String(v ?? '')}</td>`).join('')}</tr>`
                 <div className="font-semibold text-sm">{selected.facilityName}</div>
                 <div className="text-xs text-muted mt-1">{selected.district} · {selected.facilityType}</div>
                 <div className="text-xs text-muted">
-                  <a href={`tel:${selected.mobile}`} style={{ textDecoration: 'none' }}>📞 {selected.mobile}</a>
+                  <a href={`tel:${selected.mobile}`} style={{ textDecoration: 'none' }}><MaterialIcon name="phone" size={16} /> {selected.mobile}</a>
                   {' · '}{selected.email}
                 </div>
                 <div className="text-sm" style={{ marginTop: 8 }}>{Array.isArray(selected.issueCategory) ? selected.issueCategory.join(', ') : selected.issueCategory}</div>
@@ -556,44 +577,54 @@ ${rows.map(r => `<tr>${r.map(v => `<td>${String(v ?? '')}</td>`).join('')}</tr>`
                 </div>
               )}
 
-              {/* Update form */}
-              {awaitingOtp ? (
-                <>
-                  <div className="alert alert-info mb-3" style={{ fontSize: '0.85rem' }}>
-                    OTP sent to <strong>{selected.email}</strong>. Ask the complainant for the code.
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">OTP from Complainant</label>
-                    <input className="form-control" placeholder="e.g. 123456" maxLength={6} value={formData.otp} onChange={e => setFormData(d => ({ ...d, otp: e.target.value.replace(/\D/g, '') }))} style={{ fontFamily: 'var(--mono)', letterSpacing: '0.2em', fontSize: '1.2rem' }} />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="form-group">
-                    <label className="form-label">Status</label>
-                    <select className="form-control" value={formData.status} onChange={e => setFormData(d => ({ ...d, status: e.target.value }))}>
-                      <option value="open">Open</option>
-                      <option value="in_progress">In Progress</option>
-                      <option value="resolved">Resolved</option>
-                      <option value="closed">Closed</option>
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Work Notes</label>
-                    <textarea className="form-control" rows={4} placeholder="Describe what was done..." value={formData.notes} onChange={e => setFormData(d => ({ ...d, notes: e.target.value }))} style={{ resize: 'vertical' }} />
-                  </div>
-                </>
+              {/* Update form — hidden for resolved/closed tickets */}
+              {selected.status !== 'resolved' && selected.status !== 'closed' && (
+                awaitingOtp ? (
+                  <>
+                    <div className="alert alert-info mb-3" style={{ fontSize: '0.85rem' }}>
+                      OTP sent to <strong>{selected.email}</strong>. Ask the complainant for the code.
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">OTP from Complainant</label>
+                      <input className="form-control" placeholder="e.g. 123456" maxLength={6} value={formData.otp} onChange={e => setFormData(d => ({ ...d, otp: e.target.value.replace(/\D/g, '') }))} style={{ fontFamily: 'var(--mono)', letterSpacing: '0.2em', fontSize: '1.2rem' }} />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="form-group">
+                      <label className="form-label">Status</label>
+                      <div className="material-select-wrap">
+                        <select className="form-control" value={formData.status} onChange={e => setFormData(d => ({ ...d, status: e.target.value }))}>
+                          <option value="open">Open</option>
+                          <option value="in_progress">In Progress</option>
+                          <option value="resolved">Resolved</option>
+                          <option value="closed">Closed</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Work Notes</label>
+                      <textarea className="form-control" rows={4} placeholder="Describe what was done..." value={formData.notes} onChange={e => setFormData(d => ({ ...d, notes: e.target.value }))} style={{ resize: 'vertical' }} />
+                    </div>
+                  </>
+                )
               )}
             </div>
             <div className="modal-footer">
-              <button className="btn btn-ghost" onClick={() => { setModal(false); setAwaitingOtp(false); }}>Cancel</button>
-              <button className="btn btn-success" onClick={handleUpdate} disabled={saving || (awaitingOtp && formData.otp.length !== 6)}>
-                {saving ? <span className="spinner" /> : awaitingOtp ? '✓ Confirm' : (formData.status === 'resolved' ? 'Mark Resolved' : 'Update')}
+              <button className="btn btn-ghost" onClick={() => { setModal(false); setAwaitingOtp(false); }}>
+                {selected.status === 'resolved' || selected.status === 'closed' ? 'Close' : 'Cancel'}
               </button>
+              {selected.status !== 'resolved' && selected.status !== 'closed' && (
+                <button className="btn btn-success" onClick={handleUpdate} disabled={saving || (awaitingOtp && formData.otp.length !== 6)}>
+                  {saving ? <span className="spinner" /> : awaitingOtp ? <><MaterialIcon name="check" size={16} /> Confirm</> : (formData.status === 'resolved' ? 'Mark Resolved' : 'Update')}
+                </button>
+              )}
             </div>
           </div>
         </div>
       )}
+
+      {LogoutConfirmModal}
     </div>
   );
 }

@@ -18,55 +18,30 @@ import {
   getFacilities,
   getNotificationDirectory,
   saveGlobalNotificationContacts,
-  saveFacilityNotificationMapping
+  saveFacilityNotificationMapping,
+  getTeamLeads,
+  escapeHtml
 } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import StatusBadge from '../components/StatusBadge';
+import EmptyState from '../components/EmptyState';
+import MaterialIcon from '../components/MaterialIcon';
 import useTheme from '../hooks/useTheme';
+import { useLogoutConfirm } from '../hooks/useLogoutConfirm';
+import { STATUS_COLORS, CHART_COLORS } from '../utils/constants';
+import { fmt } from '../utils/dates';
 
 const NAV = [
-  { id: 'dashboard', label: 'Dashboard', icon: '📊' },
-  { id: 'complaints', label: 'All Complaints', icon: '📋' },
-  { id: 'engineers', label: 'Manage Users', icon: '👥' },
-  { id: 'mapping', label: 'Facility Mapping', icon: '📡' },
-  { id: 'unmapped', label: 'Unmapped Facilities', icon: '🧭' },
-  { id: 'reports', label: 'Reports', icon: '📈' },
-  { id: 'seed', label: 'Seed Facilities', icon: '🏥' },
+  { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
+  { id: 'complaints', label: 'All Complaints', icon: 'assignment' },
+  { id: 'engineers', label: 'Manage Users', icon: 'group' },
+  { id: 'mapping', label: 'Facility Mapping', icon: 'settings_input_antenna' },
+  { id: 'unmapped', label: 'Unmapped Facilities', icon: 'explore' },
+  { id: 'reports', label: 'Reports', icon: 'trending_up' },
+  { id: 'seed', label: 'Seed Facilities', icon: 'local_hospital' },
 ];
-
-const STATUS_COLORS = {
-  open: '#1D4ED8',
-  in_progress: '#B45309',
-  resolved: '#1A7A4A',
-  closed: '#64748B'
-};
-
-const CHART_COLORS = ['#0F4C81', '#1A6BB5', '#E8741A', '#1A7A4A', '#B45309', '#64748B', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316'];
-
-function StatCard({ icon, value, label, subtitle, color, trend }) {
-  return (
-    <div className="card premium-stat-card" style={{ borderLeft: `4px solid ${color}`, position: 'relative', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', top: -12, right: -12, width: 80, height: 80, borderRadius: '50%', background: color + '0A', pointerEvents: 'none' }} />
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <div className="stat-label">{label}</div>
-          <div className="stat-value">{typeof value === 'number' ? value.toLocaleString() : value}</div>
-          {subtitle && <div className="stat-subtitle">{subtitle}</div>}
-        </div>
-        <div className="premium-stat-icon" style={{ background: color + '18', color }}>
-          {icon}
-        </div>
-      </div>
-      {trend !== undefined && (
-        <div className="stat-trend" style={{ color: trend >= 0 ? '#1A7A4A' : '#B91C1C' }}>
-          {trend >= 0 ? '↑' : '↓'} {Math.abs(trend)}%
-        </div>
-      )}
-    </div>
-  );
-}
 
 function CustomTooltip({ active, payload, label }) {
   if (active && payload && payload.length) {
@@ -84,33 +59,18 @@ function CustomTooltip({ active, payload, label }) {
   return null;
 }
 
-function ChartCard({ title, subtitle, children, action }) {
-  return (
-    <div className="card chart-card">
-      <div className="card-header">
-        <div>
-          <h3 className="card-title" style={{ fontSize: '1rem' }}>{title}</h3>
-          {subtitle && <div className="text-xs text-muted mt-1">{subtitle}</div>}
-        </div>
-        {action}
-      </div>
-      <div className="card-body">
-        {children}
-      </div>
-    </div>
-  );
-}
-
 export default function AdminDashboard() {
   const { user, logoutUser } = useAuth();
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
+  const { confirmLogout, LogoutConfirmModal } = useLogoutConfirm();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [stats, setStats] = useState(null);
   const [complaints, setComplaints] = useState([]);
   const [total, setTotal] = useState(0);
   const [engineers, setEngineers] = useState([]);
   const [users, setUsers] = useState([]);
+  const [teamLeadsList, setTeamLeadsList] = useState([]);
   const [filter, setFilter] = useState({ status: '', district: '', priority: '', engineer: '', startDate: '', endDate: '', issueCategory: '', search: '' });
   const [page, setPage] = useState(1);
   const [exportFormat, setExportFormat] = useState('excel');
@@ -119,7 +79,7 @@ export default function AdminDashboard() {
   const [modalData, setModalData] = useState({});
   const [statusAwaitingOtp, setStatusAwaitingOtp] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'engineer', assignedDistricts: '' });
+  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'engineer', assignedDistricts: '', teamLeadId: '' });
   const [seedJson, setSeedJson] = useState('');
   const [msg, setMsg] = useState('');
   const [confirmAction, setConfirmAction] = useState(null); // { title, message, onConfirm }
@@ -133,9 +93,11 @@ export default function AdminDashboard() {
   const [unmappedPage, setUnmappedPage] = useState(1);
   const [allFacilities, setAllFacilities] = useState([]);
   const districtsCache = useRef(null);
+  const searchTimerRef = useRef(null);
+  const [localSearch, setLocalSearch] = useState('');
   const loadDistricts = useCallback(() => {
     if (districtsCache.current) { setDistrictOptions(districtsCache.current); return; }
-    getDistricts().then(r => { districtsCache.current = r.data || []; setDistrictOptions(districtsCache.current); }).catch(() => {});
+    getDistricts().then(r => { districtsCache.current = r.data || []; setDistrictOptions(districtsCache.current); }).catch(() => { toast.error('Failed to load districts'); });
   }, []);
   const [mappingForm, setMappingForm] = useState({
     district: '',
@@ -161,12 +123,12 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (!user || user.role !== 'admin') { navigate('/login'); return; }
     loadStats();
-    getEngineers().then(r => setEngineers(r.data));
+    getEngineers().then(r => setEngineers(r.data)).catch(() => { toast.error('Failed to load engineers'); });
   }, [user]);
 
   useEffect(() => { if (activeTab === 'complaints') loadComplaints(); }, [activeTab, filter, page]);
   useEffect(() => { if (activeTab === 'complaints') { loadDistricts(); } }, [activeTab]);
-  useEffect(() => { if (activeTab === 'engineers') getUsers().then(r => setUsers(r.data)); }, [activeTab]);
+  useEffect(() => { if (activeTab === 'engineers') { getUsers().then(r => setUsers(r.data)).catch(() => { toast.error('Failed to load users'); }); getTeamLeads().then(r => setTeamLeadsList(r.data)).catch(() => { toast.error('Failed to load team leads'); }); } }, [activeTab]);
   useEffect(() => {
     if (activeTab === 'mapping' || activeTab === 'unmapped') {
       loadDistricts();
@@ -182,7 +144,7 @@ export default function AdminDashboard() {
           opsManagerEmail: doc?.opsManager?.email || '',
           opsManagerMobile: doc?.opsManager?.mobile || ''
         });
-      });
+      }).catch(() => {});
     }
   }, [activeTab]);
   useEffect(() => {
@@ -196,13 +158,12 @@ export default function AdminDashboard() {
   useEffect(() => { setMappingPage(1); }, [directory]);
   useEffect(() => { setUnmappedPage(1); }, [directory, allFacilities]);
 
-  const loadStats = () => getComplaintStats().then(r => setStats(r.data)).catch(() => {});
+  const loadStats = () => getComplaintStats().then(r => setStats(r.data)).catch(() => { toast.error('Failed to load stats'); });
   const loadComplaints = useCallback(() => {
-    getComplaints({ ...filter, page, limit: 15 }).then(r => { setComplaints(r.data.complaints); setTotal(r.data.total); });
+    getComplaints({ ...filter, page, limit: 15 }).then(r => { setComplaints(r.data.complaints); setTotal(r.data.total); }).catch(() => { toast.error('Failed to load complaints'); });
   }, [filter, page]);
 
   const statMap = (key) => stats?.statusStats?.find(s => s._id === key)?.count || 0;
-  const fmt = (d) => d ? new Date(d).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : '—';
   const MAPPING_PAGE_SIZE = 25;
   const mappedRows = directory?.mappings || [];
   const mappingPages = Math.max(1, Math.ceil(mappedRows.length / MAPPING_PAGE_SIZE));
@@ -243,10 +204,10 @@ export default function AdminDashboard() {
   const handleNewUser = async () => {
     setLoading(true);
     try {
-      await registerUser({ ...newUser, assignedDistricts: newUser.assignedDistricts.split(',').map(s => s.trim()).filter(Boolean) });
+      await registerUser({ ...newUser, assignedDistricts: newUser.assignedDistricts.split(',').map(s => s.trim()).filter(Boolean), teamLeadId: newUser.teamLeadId || undefined });
       setModal(null); toast.success('User created');
-      getUsers().then(r => setUsers(r.data));
-      setNewUser({ name: '', email: '', password: '', role: 'engineer', assignedDistricts: '' });
+      getUsers().then(r => setUsers(r.data)).catch(() => {});
+      setNewUser({ name: '', email: '', password: '', role: 'engineer', assignedDistricts: '', teamLeadId: '' });
     } catch(e) { toast.error(e.response?.data?.error || e.response?.data?.message || 'Failed'); }
     finally { setLoading(false); }
   };
@@ -256,11 +217,12 @@ export default function AdminDashboard() {
     try {
       await updateUser(newUser._id, {
         name: newUser.name,
-        assignedDistricts: newUser.assignedDistricts.split(',').map(s => s.trim()).filter(Boolean)
+        assignedDistricts: newUser.assignedDistricts.split(',').map(s => s.trim()).filter(Boolean),
+        teamLeadId: newUser.teamLeadId || null
       });
       setModal(null); toast.success('User updated');
-      getUsers().then(r => setUsers(r.data));
-      setNewUser({ name: '', email: '', password: '', role: 'engineer', assignedDistricts: '' });
+      getUsers().then(r => setUsers(r.data)).catch(() => {});
+      setNewUser({ name: '', email: '', password: '', role: 'engineer', assignedDistricts: '', teamLeadId: '' });
     } catch(e) { toast.error(e.response?.data?.error || e.response?.data?.message || 'Failed'); }
     finally { setLoading(false); }
   };
@@ -274,7 +236,7 @@ export default function AdminDashboard() {
         try {
           await deleteUser(u._id);
           toast.success('User deactivated');
-          getUsers().then(r => setUsers(r.data));
+          getUsers().then(r => setUsers(r.data)).catch(() => {});
         } catch(e) { toast.error(e.response?.data?.error || e.response?.data?.message || 'Failed'); }
       }
     });
@@ -290,6 +252,7 @@ export default function AdminDashboard() {
       const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
       if (exportFormat === 'pdf') {
         const win = window.open('', '_blank');
+        if (!win) { toast.error('Popup blocked. Please allow popups for this site.'); return; }
         win.document.write(`<html><head><title>Complaint Report</title>
 <style>body{font-family:Arial,sans-serif;margin:24px;font-size:12px}
 h2{color:#0F4C81;margin-bottom:4px}
@@ -302,7 +265,7 @@ td{padding:6px;border-bottom:1px solid #ddd;font-size:11px}
 <h2>Digital Sanchar Sathi — Complaint Report</h2>
 <div class="sub">Generated: ${new Date().toLocaleString('en-IN')} | ${data.length} complaints</div>
 <table><thead><tr><th>Ticket ID</th><th>Complainant</th><th>District</th><th>Facility</th><th>Issue</th><th>Priority</th><th>Status</th><th>Assigned To</th><th>Created</th></tr></thead><tbody>
-${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.district}</td><td>${c.facilityName}</td><td>${(c.issueCategory || []).join('; ')}</td><td>${c.priority}</td><td>${c.status}</td><td>${c.assignedTo?.name || '-'}</td><td>${fmtDate(c.createdAt)}</td></tr>`).join('')}
+${data.map(c => `<tr><td>${escapeHtml(c.ticketId)}</td><td>${escapeHtml(c.userName)}</td><td>${escapeHtml(c.district)}</td><td>${escapeHtml(c.facilityName)}</td><td>${escapeHtml((c.issueCategory || []).join('; '))}</td><td>${escapeHtml(c.priority)}</td><td>${escapeHtml(c.status)}</td><td>${escapeHtml(c.assignedTo?.name || '-')}</td><td>${fmtDate(c.createdAt)}</td></tr>`).join('')}
 </tbody></table>
 <div class="footer">Digital Sanchar Sathi — Jharkhand Health WiFi Complaint Management System</div>
 <script>window.onload=function(){window.print()}</script>
@@ -316,9 +279,9 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
         const headers = ['Ticket ID', 'Complainant', 'District', 'Facility', 'Issue', 'Priority', 'Status', 'Assigned To', 'Created'];
         const rows = data.map(c => [c.ticketId, c.userName, c.district, c.facilityName, (c.issueCategory || []).join('; '), c.priority, c.status, c.assignedTo?.name || '-', c.createdAt]);
         let xml = '<?xml version="1.0"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="Complaints"><Table>';
-        xml += '<Row>' + headers.map(h => `<Cell><Data ss:Type="String">${h}</Data></Cell>`).join('') + '</Row>';
+        xml += '<Row>' + headers.map(h => `<Cell><Data ss:Type="String">${escapeHtml(h)}</Data></Cell>`).join('') + '</Row>';
         rows.forEach(r => {
-          xml += '<Row>' + r.map(v => `<Cell><Data ss:Type="String">${String(v ?? '')}</Data></Cell>`).join('') + '</Row>';
+          xml += '<Row>' + r.map(v => `<Cell><Data ss:Type="String">${escapeHtml(String(v ?? ''))}</Data></Cell>`).join('') + '</Row>';
         });
         xml += '</Table></Worksheet></Workbook>';
         content = xml;
@@ -356,10 +319,10 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
       const arr = Array.isArray(data) ? data : [data];
       const { seedFacilities } = await import('../api');
       const res = await seedFacilities(arr);
-      setMsg(`✅ ${res.data?.message || `${arr.length} facilities seeded successfully!`}`);
+      setMsg(res.data?.message || `${arr.length} facilities seeded successfully!`);
     } catch(e) {
       const err = e.response?.data?.error || e.response?.data?.message || e.message;
-      setMsg('❌ Invalid JSON or seed failed: ' + err);
+      setMsg('Invalid JSON or seed failed: ' + err);
     }
   };
   const handleSaveGlobalContacts = async () => {
@@ -378,15 +341,15 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
         }
       });
       setDirectory(res.data.directory);
-      setMsg('✅ Global contacts saved successfully.');
+      setMsg('Global contacts saved successfully.');
     } catch (e) {
-      setMsg('❌ Failed to save global contacts: ' + (e.response?.data?.message || e.message));
+      setMsg('Failed to save global contacts: ' + (e.response?.data?.message || e.message));
     } finally {
       setMappingLoading(false);
     }
   };
   const handleSaveFacilityMapping = async () => {
-    if (!mappingForm.facilityCode) return setMsg('❌ Please select a health facility.');
+    if (!mappingForm.facilityCode) return setMsg('Please select a health facility.');
     setMappingLoading(true);
     try {
       const res = await saveFacilityNotificationMapping(mappingForm.facilityCode, {
@@ -405,9 +368,9 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
         }
       });
       setDirectory(res.data.directory);
-      setMsg('✅ Facility mapping saved successfully.');
+      setMsg('Facility mapping saved successfully.');
     } catch (e) {
-      setMsg('❌ Failed to save facility mapping: ' + (e.response?.data?.message || e.message));
+      setMsg('Failed to save facility mapping: ' + (e.response?.data?.message || e.message));
     } finally {
       setMappingLoading(false);
     }
@@ -430,7 +393,7 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
       return [...(prev || []), { facility_code: m.facilityCode, facility_name: m.facilityName }];
     });
     setActiveTab('mapping');
-    setMsg(`✏️ Editing mapping for ${m.facilityName}`);
+    setMsg(`Editing mapping for ${m.facilityName}`);
   };
   const mapFacilityNow = (facility) => {
     setMappingForm(v => ({
@@ -445,16 +408,16 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
       return [...(prev || []), { facility_code: facility.facility_code, facility_name: facility.facility_name }];
     });
     setActiveTab('mapping');
-    setMsg(`🧩 Add mapping details for ${facility.facility_name}`);
+    setMsg(`Add mapping details for ${facility.facility_name}`);
   };
 
   if (!stats && complaints.length === 0) {
     return (
       <div>
-        <nav className="navbar">
+        <nav className="navbar glass-navbar">
           <div className="navbar-inner navbar-inner-split">
             <div className="navbar-logo-slot navbar-logo-slot--left navbar-admin-left">
-              <div className="hamburger-btn" style={{ visibility: 'hidden' }}>☰</div>
+              <div className="hamburger-btn" style={{ visibility: 'hidden' }}><MaterialIcon name="menu" size={24} /></div>
               <div className="skel" style={{ width: 42, height: 42, borderRadius: 8 }} />
             </div>
             <div className="navbar-brand-center">
@@ -482,10 +445,10 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
   return (
     <div className="page-wrapper">
       {/* Navbar */}
-      <nav className="navbar">
+      <nav className="navbar glass-navbar">
         <div className="navbar-inner navbar-inner-split">
           <div className="navbar-logo-slot navbar-logo-slot--left navbar-admin-left">
-            <button type="button" className="hamburger-btn" onClick={() => setSidebarOpen(true)} aria-label="Open menu">☰</button>
+            <button type="button" className="hamburger-btn" onClick={() => setSidebarOpen(true)} aria-label="Open menu"><MaterialIcon name="menu" size={24} /></button>
             <img src="/logos/abdm.png" alt="ABDM" className="navbar-logo-img" />
           </div>
           <div className="navbar-brand-center">
@@ -493,12 +456,10 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
             <span className="navbar-subtitle">स्वास्थ्य और संचार, हर कदम आपके साथ</span>
           </div>
           <div className="navbar-logo-slot navbar-logo-slot--right">
-            <button type="button" className="theme-toggle-btn" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>{theme === 'dark' ? '☀️' : '🌙'}</button>
             <img src="/logos/bsnl.png" alt="BSNL" className="navbar-logo-img" />
             <div className="navbar-actions navbar-actions--compact">
               <span className="navbar-user navbar-user--compact">{user?.name}</span>
               <span className="navbar-role navbar-role--compact">Admin</span>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => { logoutUser(); navigate('/login'); }} style={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)' }}>Logout</button>
             </div>
           </div>
         </div>
@@ -511,7 +472,7 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
       <aside className={`sidebar-mobile ${sidebarOpen ? 'open' : ''}`}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--gray-100)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span className="font-semibold">Menu</span>
-          <button className="btn btn-ghost btn-sm" onClick={() => setSidebarOpen(false)} style={{ padding: '4px 8px' }}>✕</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setSidebarOpen(false)} style={{ padding: '4px 8px' }}><MaterialIcon name="close" size={20} /></button>
         </div>
         <div className="sidebar-section" style={{ paddingTop: 16 }}>
           <div className="sidebar-label">Navigation</div>
@@ -520,16 +481,24 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
             const inProg = stats?.statusStats?.find(s => s._id === 'in_progress')?.count || 0;
             const badge = n.id === 'dashboard' && pending + inProg > 0 ? pending + inProg : null;
             return (
-              <div key={n.id} className={`sidebar-link ${activeTab === n.id ? 'active' : ''}`} onClick={() => { setActiveTab(n.id); setSidebarOpen(false); }}>
-                <span>{n.icon}</span>{n.label}
+              <div key={n.id} className={`sidebar-link material-nav-item ${activeTab === n.id ? 'active' : ''}`} role="link" tabIndex={0} onClick={() => { setActiveTab(n.id); setSidebarOpen(false); }} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveTab(n.id); setSidebarOpen(false); } }}>
+                <MaterialIcon name={n.icon} size={20} />{n.label}
                 {badge !== null && <span className="nav-badge">{badge}</span>}
               </div>
             );
           })}
         </div>
-        <div className="sidebar-section" style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--gray-100)' }}>
-          <div className="sidebar-link" onClick={() => { logoutUser(); navigate('/'); setSidebarOpen(false); }}>
-            <span>🏠</span>Public Portal
+          <div className="sidebar-section" style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--gray-100)' }}>
+          <div className="sidebar-link material-nav-item" role="link" tabIndex={0} onClick={() => { window.open('/', '_blank'); setSidebarOpen(false); }} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.open('/', '_blank'); setSidebarOpen(false); } }}>
+            <MaterialIcon name="home" size={20} />Public Portal
+          </div>
+          <div className="sidebar-link material-nav-item" role="link" tabIndex={0}
+            onClick={toggleTheme}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleTheme(); } }}>
+            <MaterialIcon name={theme === 'dark' ? 'light_mode' : 'dark_mode'} size={20} /> {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+          </div>
+          <div className="sidebar-link material-nav-item" role="link" tabIndex={0} onClick={confirmLogout} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); confirmLogout(); } }}>
+            <MaterialIcon name="logout" size={20} />Logout
           </div>
         </div>
       </aside>
@@ -544,82 +513,99 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
               const inProg = stats?.statusStats?.find(s => s._id === 'in_progress')?.count || 0;
               const badge = n.id === 'dashboard' && pending + inProg > 0 ? pending + inProg : null;
               return (
-                <div key={n.id} className={`sidebar-link ${activeTab === n.id ? 'active' : ''}`} onClick={() => setActiveTab(n.id)}>
-                  <span>{n.icon}</span>{n.label}
+                <div key={n.id} className={`sidebar-link material-nav-item ${activeTab === n.id ? 'active' : ''}`} role="link" tabIndex={0} onClick={() => setActiveTab(n.id)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveTab(n.id); } }}>
+                  <MaterialIcon name={n.icon} size={20} />{n.label}
                   {badge !== null && <span className="nav-badge">{badge}</span>}
                 </div>
               );
             })}
           </div>
           <div className="sidebar-section" style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--gray-100)' }}>
-            <div className="sidebar-link" onClick={() => { logoutUser(); navigate('/'); }}>
-              <span>🏠</span>Public Portal
+            <div className="sidebar-link material-nav-item" role="link" tabIndex={0} onClick={() => window.open('/', '_blank')} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.open('/', '_blank'); } }}>
+              <MaterialIcon name="home" size={20} />Public Portal
+            </div>
+            <div className="sidebar-link material-nav-item" role="link" tabIndex={0}
+              onClick={toggleTheme}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleTheme(); } }}>
+              <MaterialIcon name={theme === 'dark' ? 'light_mode' : 'dark_mode'} size={20} /> {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+            </div>
+            <div className="sidebar-link material-nav-item" role="link" tabIndex={0} onClick={confirmLogout} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); confirmLogout(); } }}>
+              <MaterialIcon name="logout" size={20} />Logout
             </div>
           </div>
         </aside>
 
         {/* Main */}
         <main className="main-content">
-          {msg && <div className="alert alert-success mb-3" onClick={() => setMsg('')}>{msg} <span style={{ cursor: 'pointer', marginLeft: 'auto' }}>✕</span></div>}
+          {msg && <div className={`alert ${msg.toLowerCase().startsWith('failed') || msg.toLowerCase().startsWith('invalid') ? 'alert-danger' : 'alert-success'} mb-3`} onClick={() => setMsg('')}>{msg} <span style={{ cursor: 'pointer', marginLeft: 'auto' }}><MaterialIcon name="close" size={14} /></span></div>}
 
           {/* Dashboard */}
           {activeTab === 'dashboard' && (
             <div>
-              <div className="flex justify-between items-center mb-4">
+              <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
                 <div>
-                  <h2 className="mb-1">Dashboard</h2>
-                  <p className="text-sm text-muted">Overview of your complaint management system</p>
+                  <h2 style={{ margin: 0, fontSize: '1.4rem' }}>Dashboard</h2>
+                  <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>Overview of your complaint management system</p>
                 </div>
-                <button className="btn btn-outline btn-sm" onClick={() => { setActiveTab('complaints'); setFilter({ status: '', district: '' }); }}>
+                <button className="btn btn-outline btn-sm" onClick={() => { setActiveTab('complaints'); setFilter({ status: '', district: '', priority: '', engineer: '', startDate: '', endDate: '', issueCategory: '', search: '' }); setLocalSearch(''); }} style={{ borderRadius: 6 }}>
                   View All Complaints →
                 </button>
               </div>
 
-              {/* Premium Metric Cards */}
-              <div className="dashboard-metrics-grid">
-                <StatCard icon="📋" value={stats?.total || 0} label="Total Complaints" subtitle="All time" color="#0F4C81" />
-                <StatCard icon="🔵" value={statMap('open')} label="Open" subtitle="Awaiting action" color="#1D4ED8" />
-                <StatCard icon="🟡" value={statMap('in_progress')} label="In Progress" subtitle="Being resolved" color="#B45309" />
-                <StatCard icon="✅" value={stats?.resolvedTodayCount || 0} label="Resolved Today" subtitle="Past 24 hours" color="#1A7A4A" />
-                <StatCard icon="👷" value={stats?.activeEngineerCount || 0} label="Active Engineers" subtitle={`${stats?.engineerCount || 0} total registered`} color="#8B5CF6" />
-                <StatCard icon="🏥" value={stats?.districtStats?.length || 0} label="Active Districts" subtitle="With complaints" color="#14B8A6" />
+              {/* Metric Cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 14, marginBottom: 24 }}>
+                {[
+                  { icon: 'assignment', value: stats?.total || 0, label: 'Total Complaints', sub: 'All time', color: '#0F4C81' },
+                  { icon: 'radio_button_checked', value: statMap('open'), label: 'Open', sub: 'Awaiting action', color: '#1D4ED8' },
+                  { icon: 'pending', value: statMap('in_progress'), label: 'In Progress', sub: 'Being resolved', color: '#B45309' },
+                  { icon: 'check_circle', value: stats?.resolvedTodayCount || 0, label: 'Resolved Today', sub: 'Past 24 hours', color: '#1A7A4A' },
+                  { icon: 'engineering', value: stats?.activeEngineerCount || 0, label: 'Active Engineers', sub: `${stats?.engineerCount || 0} total registered`, color: '#8B5CF6' },
+                  { icon: 'local_hospital', value: stats?.districtStats?.length || 0, label: 'Active Districts', sub: 'With complaints', color: '#14B8A6' },
+                ].map((item, i) => (
+                  <div key={i} className="card hover-lift glass-card material-kpi" style={{ padding: '16px 14px', borderTop: `3px solid ${item.color}`, position: 'relative', overflow: 'hidden' }}>
+                    <div style={{ position: 'absolute', top: -12, right: -12, width: 80, height: 80, borderRadius: '50%', background: item.color + '0A', pointerEvents: 'none' }} />
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{item.label}</div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 700, color: item.color, lineHeight: 1.2, marginTop: 4 }}>{typeof item.value === 'number' ? item.value.toLocaleString() : item.value}</div>
+                        {item.sub && <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 2 }}>{item.sub}</div>}
+                      </div>
+                      <div style={{ width: 40, height: 40, borderRadius: 10, background: item.color + '15', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', flexShrink: 0 }}><MaterialIcon name={item.icon} size={24} /></div>
+                    </div>
+                  </div>
+                ))}
               </div>
 
               {/* Charts Row */}
               {stats && (
-                <div className="dashboard-charts-grid">
-                  {/* Monthly Trend Bar Chart */}
-                  <ChartCard
-                    title="Monthly Complaint Trend"
-                    subtitle="Complaints registered per month"
-                  >
+                <div className="responsive-grid-2" style={{ marginBottom: 24 }}>
+                  <div className="card" style={{ padding: 24 }}>
+                    <h3 style={{ fontSize: '0.9rem', marginBottom: 16, color: 'var(--text-primary)', fontWeight: 600 }}>Monthly Complaint Trend</h3>
                     {stats.monthlyStats?.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={280}>
+                      <ResponsiveContainer width="100%" height={240}>
                         <BarChart data={stats.monthlyStats.map(m => ({
                           name: new Date(m._id.year, m._id.month - 1).toLocaleString('default', { month: 'short', year: '2-digit' }),
                           Complaints: m.count
                         }))} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                          <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748B' }} axisLine={{ stroke: '#E2E8F0' }} tickLine={false} />
-                          <YAxis tick={{ fontSize: 11, fill: '#64748B' }} axisLine={false} tickLine={false} />
+                          <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748B' }} axisLine={{ stroke: '#E2E8F0' }} tickLine={false} />
+                          <YAxis tick={{ fontSize: 10, fill: '#64748B' }} axisLine={false} tickLine={false} />
                           <Tooltip content={<CustomTooltip />} />
                           <Bar dataKey="Complaints" fill="#0F4C81" radius={[4, 4, 0, 0]} maxBarSize={48} />
                         </BarChart>
                       </ResponsiveContainer>
                     ) : (
-                      <div className="empty-state" style={{ padding: '40px 24px' }}>
-                        <div className="empty-title text-muted">No monthly data available yet</div>
+                      <div style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        <div style={{ fontSize: '2rem', marginBottom: 8, opacity: 0.5 }}><MaterialIcon name="bar_chart" size={48} color="var(--gray-300)" /></div>
+                        <div style={{ fontSize: '0.85rem' }}>No monthly data available yet</div>
                       </div>
                     )}
-                  </ChartCard>
+                  </div>
 
-                  {/* Status Distribution Pie Chart */}
-                  <ChartCard
-                    title="Complaint Status"
-                    subtitle="Breakdown by current status"
-                  >
+                  <div className="card" style={{ padding: 24 }}>
+                    <h3 style={{ fontSize: '0.9rem', marginBottom: 16, color: 'var(--text-primary)', fontWeight: 600 }}>Complaint Status</h3>
                     {stats.statusStats?.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={280}>
+                      <ResponsiveContainer width="100%" height={240}>
                         <PieChart>
                           <Pie
                             data={stats.statusStats.map(s => ({
@@ -630,7 +616,7 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
                             cx="50%"
                             cy="50%"
                             innerRadius={55}
-                            outerRadius={90}
+                            outerRadius={85}
                             paddingAngle={3}
                             dataKey="value"
                           >
@@ -649,63 +635,75 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
                         </PieChart>
                       </ResponsiveContainer>
                     ) : (
-                      <div className="empty-state" style={{ padding: '40px 24px' }}>
-                        <div className="empty-title text-muted">No status data available</div>
+                      <div style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        <div style={{ fontSize: '2rem', marginBottom: 8, opacity: 0.5 }}><MaterialIcon name="bar_chart" size={48} color="var(--gray-300)" /></div>
+                        <div style={{ fontSize: '0.85rem' }}>No status data available</div>
                       </div>
                     )}
-                  </ChartCard>
+                  </div>
                 </div>
               )}
 
               {/* District & Category Stats */}
-              <div className="dashboard-secondary-grid">
+              <div className="responsive-grid-2">
                 {stats?.districtStats?.length > 0 && (
-                  <div className="card">
-                    <div className="card-header"><span className="card-title">Top Districts</span></div>
-                    <div className="card-body" style={{ padding: 0 }}>
-                      <div className="table-wrapper">
-                        <table>
-                          <thead><tr><th>District</th><th>Complaints</th><th>Share</th></tr></thead>
-                          <tbody>
-                            {stats.districtStats.map(d => (
-                              <tr key={d._id}>
-                                <td className="font-semibold">{d._id}</td>
-                                <td>{d.count}</td>
-                                <td>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <div style={{ height: 6, width: `${(d.count / stats.total * 100).toFixed(0)}%`, minWidth: 4, background: 'var(--primary)', borderRadius: 3 }} />
-                                    <span className="text-xs text-muted">{(d.count / stats.total * 100).toFixed(1)}%</span>
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
+                  <div className="card" style={{ padding: 0 }}>
+                    <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-color)' }}>
+                      <h3 style={{ fontSize: '0.9rem', margin: 0, fontWeight: 600 }}>Top Districts</h3>
+                    </div>
+                    <div style={{ padding: 0 }}>
+                      <table className="material-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>District</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Complaints</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Share</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stats.districtStats.map(d => (
+                            <tr key={d._id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                              <td style={{ padding: '10px 16px', fontWeight: 600 }}>{d._id}</td>
+                              <td style={{ padding: '10px 16px', fontWeight: 600 }}>{d.count}</td>
+                              <td style={{ padding: '10px 16px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <div style={{ height: 6, width: `${(d.count / stats.total * 100).toFixed(0)}%`, minWidth: 4, background: 'var(--primary)', borderRadius: 3 }} />
+                                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{(d.count / stats.total * 100).toFixed(1)}%</span>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}
 
                 {stats?.categoryStats?.length > 0 && (
-                  <div className="card">
-                    <div className="card-header"><span className="card-title">Issue Categories</span></div>
-                    <div className="card-body" style={{ padding: 0 }}>
-                      <div className="table-wrapper">
-                        <table>
-                          <thead><tr><th>Category</th><th>Count</th></tr></thead>
-                          <tbody>
-                            {stats.categoryStats.map((c, i) => (
-                              <tr key={c._id}>
-                                <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: CHART_COLORS[i % CHART_COLORS.length], display: 'inline-block', flexShrink: 0 }} />
-                                  {c._id}
-                                </td>
-                                <td className="font-semibold">{c.count}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
+                  <div className="card" style={{ padding: 0 }}>
+                    <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-color)' }}>
+                      <h3 style={{ fontSize: '0.9rem', margin: 0, fontWeight: 600 }}>Issue Categories</h3>
+                    </div>
+                    <div style={{ padding: 0 }}>
+                      <table className="material-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Category</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Count</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stats.categoryStats.map((c, i) => (
+                            <tr key={c._id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                              <td style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ width: 8, height: 8, borderRadius: '50%', background: CHART_COLORS[i % CHART_COLORS.length], display: 'inline-block', flexShrink: 0 }} />
+                                {c._id}
+                              </td>
+                              <td style={{ padding: '10px 16px', fontWeight: 600 }}>{c.count}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}
@@ -716,84 +714,127 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
           {/* Complaints */}
           {activeTab === 'complaints' && (
             <div>
-              <div className="flex justify-between items-center mb-3" style={{ flexWrap: 'wrap', gap: 8 }}>
-                <h2>All Complaints ({total})</h2>
-                <input className="form-control" placeholder="Search..." value={filter.search || ''}
-                    onChange={e => { setFilter(f => ({ ...f, search: e.target.value })); setPage(1); }}
-                    style={{ width: 200, fontSize: '0.8rem' }} />
+              <div style={{ marginBottom: 20 }}>
+                <h2 style={{ margin: 0, fontSize: '1.4rem' }}>All Complaints ({total})</h2>
+                <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>Manage and assign complaints across all districts</p>
               </div>
 
               {/* Filters */}
-              <div className="mgmt-filter-bar" style={{ padding: '12px 20px', marginBottom: 16 }}>
-                <div className="mgmt-filter-row" style={{ marginBottom: 10 }}>
-                  <div className="form-group" style={{ flex: 'none', minWidth: 0 }}>
-                    <label className="form-label">Status</label>
-                    <div className="mgmt-filter-chips" style={{ gap: 3 }}>
-                      {[
-                        { val: '', label: 'All' },
-                        { val: 'open', label: 'Open' },
-                        { val: 'in_progress', label: 'Active' },
-                        { val: 'resolved', label: 'Done' },
-                        { val: 'closed', label: 'Closed' },
-                      ].map(({ val, label }) => (
-                        <button key={val} type="button"
-                          className={`btn btn-sm ${filter.status === val ? 'btn-primary' : 'btn-outline'}`}
-                          style={{ padding: '4px 10px', fontSize: '0.75rem', minHeight: 32 }}
-                          onClick={() => { setFilter(f => ({ ...f, status: val })); setPage(1); }}>
-                          {label}
-                        </button>
-                      ))}
-                    </div>
+              <div className="card" style={{ padding: 20, marginBottom: 20 }}>
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {[
+                      { val: '', label: 'All' },
+                      { val: 'open', label: 'Open' },
+                      { val: 'in_progress', label: 'Active' },
+                      { val: 'resolved', label: 'Done' },
+                      { val: 'closed', label: 'Closed' },
+                    ].map(({ val, label }) => (
+                      <button key={val} type="button"
+                        className={`btn btn-sm ${filter.status === val ? 'btn-primary' : 'btn-outline'}`}
+                        style={{ padding: '5px 14px', fontSize: '0.78rem', borderRadius: 6 }}
+                        onClick={() => { setFilter(f => ({ ...f, status: val })); setPage(1); }}>
+                        {label}
+                      </button>
+                    ))}
                   </div>
                 </div>
-                <div className="mgmt-filter-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 2fr auto', gap: 10, alignItems: 'end' }}>
-                  <div className="form-group">
-                    <label className="form-label">District</label>
-                    <select className="form-control" value={filter.district} onChange={e => { setFilter(f => ({ ...f, district: e.target.value })); setPage(1); }}>
-                      <option value="">All</option>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <input className="form-control" placeholder="Search ticket, facility..." value={localSearch}
+                    onChange={e => { const val = e.target.value; setLocalSearch(val); clearTimeout(searchTimerRef.current); searchTimerRef.current = setTimeout(() => { setFilter(f => ({ ...f, search: val })); setPage(1); }, 300); }}
+                    style={{ flex: '1 1 180px', fontSize: '0.85rem' }} />
+                  <div className="material-select-wrap" style={{ flex: '1 1 130px' }}>
+                    <select className="form-control" style={{ width: '100%', fontSize: '0.85rem' }} value={filter.district} onChange={e => { setFilter(f => ({ ...f, district: e.target.value })); setPage(1); }}>
+                      <option value="">All Districts</option>
                       {districtOptions.map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
                   </div>
-                  <div className="form-group">
-                    <label className="form-label">Priority</label>
-                    <select className="form-control" value={filter.priority} onChange={e => { setFilter(f => ({ ...f, priority: e.target.value })); setPage(1); }}>
-                      <option value="">All</option>
+                  <div className="material-select-wrap" style={{ flex: '1 1 130px' }}>
+                    <select className="form-control" style={{ width: '100%', fontSize: '0.85rem' }} value={filter.priority} onChange={e => { setFilter(f => ({ ...f, priority: e.target.value })); setPage(1); }}>
+                      <option value="">All Priority</option>
                       <option value="low">Low</option>
                       <option value="medium">Medium</option>
                       <option value="high">High</option>
                       <option value="critical">Critical</option>
                     </select>
                   </div>
-                  <div className="form-group">
-                    <label className="form-label">Engineer</label>
-                    <select className="form-control" value={filter.engineer} onChange={e => { setFilter(f => ({ ...f, engineer: e.target.value })); setPage(1); }}>
-                      <option value="">All</option>
+                  <div className="material-select-wrap" style={{ flex: '1 1 130px' }}>
+                    <select className="form-control" style={{ width: '100%', fontSize: '0.85rem' }} value={filter.engineer} onChange={e => { setFilter(f => ({ ...f, engineer: e.target.value })); setPage(1); }}>
+                      <option value="">All Engineers</option>
                       {engineers.map(eng => <option key={eng._id} value={eng._id}>{eng.name}</option>)}
                     </select>
                   </div>
-                  <div className="form-group">
-                    <label className="form-label">Date Range</label>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <input type="date" className="form-control" value={filter.startDate} onChange={e => { setFilter(f => ({ ...f, startDate: e.target.value })); setPage(1); }} style={{ fontSize: '0.75rem' }} />
-                      <input type="date" className="form-control" value={filter.endDate} onChange={e => { setFilter(f => ({ ...f, endDate: e.target.value })); setPage(1); }} style={{ fontSize: '0.75rem' }} />
-                    </div>
+                  <div className="material-date-wrap" style={{ flex: '1 1 120px' }}>
+                    <input type="date" className="form-control" value={filter.startDate} onChange={e => { setFilter(f => ({ ...f, startDate: e.target.value })); setPage(1); }} style={{ width: '100%', fontSize: '0.85rem' }} />
                   </div>
-                  <div className="mgmt-filter-clear">
-                    <label className="form-label">&nbsp;</label>
-                    <button className="btn btn-outline btn-sm" onClick={() => { setFilter({ status: '', district: '', priority: '', engineer: '', startDate: '', endDate: '', issueCategory: '', search: '' }); setPage(1); }} style={{ whiteSpace: 'nowrap' }}>Clear</button>
+                  <div className="material-date-wrap" style={{ flex: '1 1 120px' }}>
+                    <input type="date" className="form-control" value={filter.endDate} onChange={e => { setFilter(f => ({ ...f, endDate: e.target.value })); setPage(1); }} style={{ width: '100%', fontSize: '0.85rem' }} />
                   </div>
+                  <button className="btn btn-outline btn-sm" onClick={() => { setFilter({ status: '', district: '', priority: '', engineer: '', startDate: '', endDate: '', issueCategory: '', search: '' }); setLocalSearch(''); setPage(1); }} style={{ fontSize: '0.78rem' }}>Clear</button>
                 </div>
               </div>
 
               <div className="card">
-                <div className="table-wrapper">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Ticket ID</th>
-                        <th>Complainant</th>
-                        <th>District</th>
-                        <th>Facility</th>
+                {/* Mobile Card View */}
+                {complaints.length === 0 ? (
+                  <div className="mobile-complaint-card" style={{ padding: '48px 24px' }}>
+                    <EmptyState
+                      icon="inbox"
+                      title="No complaints found"
+                      description="No complaints match the current filters. Try adjusting your search criteria."
+                      action={
+                        <button className="btn btn-outline btn-sm" onClick={() => { setFilter({ status: '', district: '', priority: '', engineer: '', startDate: '', endDate: '', issueCategory: '', search: '' }); setLocalSearch(''); setPage(1); }}>
+                          Clear Filters
+                        </button>
+                      }
+                    />
+                  </div>
+                ) : (
+                  complaints.map(c => (
+                    <div key={c._id} className="mobile-complaint-card" style={{ margin: '12px 16px' }}>
+                      <div className="mobile-complaint-header">
+                        <span className="mobile-complaint-ticket">{c.ticketId}</span>
+                        <StatusBadge status={c.status} />
+                      </div>
+                      <div className="mobile-complaint-meta">
+                        <div className="mobile-complaint-meta-item">
+                          <span className="mobile-complaint-meta-label">Complainant</span>
+                          <span className="mobile-complaint-meta-value">{c.userName}</span>
+                        </div>
+                        <div className="mobile-complaint-meta-item">
+                          <span className="mobile-complaint-meta-label">District</span>
+                          <span className="mobile-complaint-meta-value">{c.district}</span>
+                        </div>
+                        <div className="mobile-complaint-meta-item">
+                          <span className="mobile-complaint-meta-label">Facility</span>
+                          <span className="mobile-complaint-meta-value">{c.facilityName}</span>
+                        </div>
+                        <div className="mobile-complaint-meta-item">
+                          <span className="mobile-complaint-meta-label">Priority</span>
+                          <span className="mobile-complaint-meta-value"><span className={`badge badge-${c.priority}`}>{c.priority}</span></span>
+                        </div>
+                      </div>
+                      <div className="mobile-complaint-footer">
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{fmt(c.createdAt)}</span>
+                        <div className="mobile-complaint-actions">
+                          <button className="btn btn-outline btn-xs" onClick={() => { setSelectedComplaint(c); setModalData({ engineerId: c.assignedTo?._id || '' }); getEngineers().then(r => setEngineers(r.data)).catch(() => {}); setModal('assign'); }}>Assign</button>
+                          <button className="btn btn-primary btn-xs" onClick={() => { setSelectedComplaint(c); setModalData({ status: c.status, notes: '', otp: '' }); setStatusAwaitingOtp(false); setModal('status'); }}>Status</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+
+                {/* Desktop Table View */}
+                <div className="table-scroll-wrapper swipe-hint">
+                  <div className="table-wrapper">
+                    <table className="material-table">
+                      <thead>
+                        <tr>
+                          <th>Ticket ID</th>
+                          <th>Complainant</th>
+                          <th>District</th>
+                          <th>Facility</th>
                         <th>Issue</th>
                         <th>Priority</th>
                         <th>Status</th>
@@ -804,7 +845,13 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
                     </thead>
                     <tbody>
                       {complaints.length === 0 && (
-                        <tr><td colSpan={10}><div className="empty-state"><div className="empty-icon">📭</div><div className="empty-title">No complaints found</div></div></td></tr>
+                        <tr><td colSpan={10}>
+                          <EmptyState
+                            icon="inbox"
+                            title="No complaints found"
+                            description="No complaints match the current filters. Try adjusting your search criteria."
+                          />
+                        </td></tr>
                       )}
                       {complaints.map(c => (
                         <tr key={c._id}>
@@ -822,7 +869,7 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
                           <td className="text-xs text-muted" style={{ whiteSpace: 'nowrap' }}>{fmt(c.createdAt)}</td>
                           <td>
                             <div className="action-btns">
-                              <button className="btn btn-ghost btn-sm" onClick={() => { setSelectedComplaint(c); setModalData({ engineerId: c.assignedTo?._id || '' }); getEngineers().then(r => setEngineers(r.data)); setModal('assign'); }}>Assign</button>
+                              <button className="btn btn-ghost btn-sm" onClick={() => { setSelectedComplaint(c); setModalData({ engineerId: c.assignedTo?._id || '' }); getEngineers().then(r => setEngineers(r.data)).catch(() => {}); setModal('assign'); }}>Assign</button>
                               <button className="btn btn-ghost btn-sm" onClick={() => { setSelectedComplaint(c); setModalData({ status: c.status, notes: '', otp: '' }); setStatusAwaitingOtp(false); setModal('status'); }}>Status</button>
                             </div>
                           </td>
@@ -830,6 +877,7 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 </div>
                 {total > 15 && (
                   <div className="flex justify-between items-center" style={{ padding: '12px 16px', borderTop: '1px solid var(--gray-100)' }}>
@@ -847,34 +895,41 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
           {/* Engineers */}
           {activeTab === 'engineers' && (
             <div>
-              <div className="flex justify-between items-center mb-3">
-                <h2>Manage Users</h2>
-                <button className="btn btn-primary" onClick={() => setModal('newUser')}>+ Add User</button>
+              <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: '1.4rem' }}>Manage Users</h2>
+                  <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>Create, edit, and manage user accounts</p>
+                </div>
+                <button className="btn btn-primary" onClick={() => setModal('newUser')} style={{ borderRadius: 6 }}>+ Add User</button>
               </div>
               <div className="card">
                 <div className="table-wrapper">
-                  <table>
-                    <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Assigned Districts</th><th>Status</th><th>Joined</th><th style={{ width: 100 }}>Actions</th></tr></thead>
+                  <table className="material-table">
+                    <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Team Lead</th><th>Assigned Districts</th><th>Status</th><th>Joined</th><th style={{ width: 100 }}>Actions</th></tr></thead>
                     <tbody>
-                      {users.filter(u => u.role === 'engineer' || u.role === 'management').map(u => (
+                      {users.filter(u => u.role === 'engineer' || u.role === 'management' || u.role === 'teamLead').map(u => {
+                        const tl = u.teamLeadId ? teamLeadsList.find(t => t._id === u.teamLeadId) : null;
+                        return (
                         <tr key={u._id}>
                           <td className="font-semibold">{u.name}</td>
                           <td className="text-sm text-muted">{u.email}</td>
                           <td><span className="badge badge-open">{u.role}</span></td>
+                          <td className="text-sm">{u.role === 'engineer' ? (tl ? `${tl.name}` : <span className="text-muted">None</span>) : '-'}</td>
                           <td className="text-sm">{u.assignedDistricts?.join(', ') || 'All districts'}</td>
                           <td><span className={`badge ${u.isActive ? 'badge-resolved' : 'badge-closed'}`}>{u.isActive ? 'Active' : 'Inactive'}</span></td>
                           <td className="text-xs text-muted">{fmt(u.createdAt)}</td>
                           <td>
                             <div className="flex gap-2">
                               <button className="btn btn-ghost btn-sm" title="Edit" onClick={() => {
-                                setNewUser({ name: u.name, email: u.email, password: '', role: u.role, assignedDistricts: (u.assignedDistricts || []).join(', '), _id: u._id });
+                                setNewUser({ name: u.name, email: u.email, password: '', role: u.role, assignedDistricts: (u.assignedDistricts || []).join(', '), teamLeadId: u.teamLeadId || '', _id: u._id });
                                 setModal('editUser');
-                              }}>✏️</button>
-                              <button className="btn btn-ghost btn-sm" title="Deactivate" onClick={() => handleDeleteUser(u)} style={{ color: '#B91C1C' }}>🗑️</button>
+                              }}><MaterialIcon name="edit" size={16} /></button>
+                              <button className="btn btn-ghost btn-sm" title="Deactivate" onClick={() => handleDeleteUser(u)} style={{ color: '#B91C1C' }}><MaterialIcon name="delete" size={16} /></button>
                             </div>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -885,43 +940,48 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
           {/* Reports */}
           {activeTab === 'reports' && (
             <div>
-              <div className="flex justify-between items-center mb-4">
-                <div>
-                  <h2 className="mb-1">Reports</h2>
-                  <p className="text-sm text-muted">Export complaint data with current filters</p>
-                </div>
+              <div style={{ marginBottom: 24 }}>
+                <h2 style={{ margin: 0, fontSize: '1.4rem' }}>Reports</h2>
+                <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>Export complaint data with current filters</p>
               </div>
-              <div className="card" style={{ maxWidth: 600 }}>
-                <div className="card-header"><span className="card-title">Export Complaints</span></div>
-                <div className="card-body">
-                  <div className="form-group">
-                    <label className="form-label">Export Format</label>
-                    <div className="flex gap-3" style={{ marginTop: 8 }}>
-                      {['excel', 'csv', 'pdf', 'json'].map(f => (
-                        <label key={f} className="flex items-center gap-2" style={{ cursor: 'pointer' }}>
-                          <input type="radio" name="reportFormat" value={f}
-                            checked={exportFormat === f} onChange={e => setExportFormat(e.target.value)} />
-                          <span className="text-sm">{f === 'json' ? 'JSON' : f === 'excel' ? 'Excel' : f === 'csv' ? 'CSV' : 'PDF'}</span>
-                        </label>
-                      ))}
-                    </div>
+              <div className="card" style={{ maxWidth: 600, padding: 24 }}>
+                <h3 style={{ fontSize: '1rem', marginBottom: 16, fontWeight: 600 }}>Export Complaints</h3>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 8, display: 'block', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Export Format</label>
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                    {[
+                      { val: 'excel', label: 'Excel', icon: 'table_chart', color: '#22c55e' },
+                      { val: 'csv', label: 'CSV', icon: 'description', color: '#3b82f6' },
+                      { val: 'pdf', label: 'PDF', icon: 'feed', color: '#ef4444' },
+                      { val: 'json', label: 'JSON', icon: 'code', color: '#8b5cf6' },
+                    ].map(({ val, label, icon, color }) => (
+                      <button key={val} type="button"
+                        onClick={() => setExportFormat(val)}
+                        className="material-export-card"
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '14px 20px', borderRadius: 10, border: `2px solid ${exportFormat === val ? color : 'var(--border-color)'}`, background: exportFormat === val ? color + '10' : 'transparent', cursor: 'pointer', transition: 'all 0.2s', minWidth: 80 }}
+                        onMouseEnter={e => e.currentTarget.style.borderColor = color}
+                        onMouseLeave={e => { if (exportFormat !== val) e.currentTarget.style.borderColor = 'var(--border-color)'; }}>
+                        <MaterialIcon name={icon} size={24} />
+                        <span style={{ fontWeight: 600, fontSize: '0.85rem', color: exportFormat === val ? color : 'var(--text-primary)' }}>{label}</span>
+                      </button>
+                    ))}
                   </div>
-                  <div className="form-group mt-3">
-                    <label className="form-label">Current Filter Context</label>
-                    <div className="text-sm text-muted" style={{ padding: '8px 12px', background: '#F8FAFC', borderRadius: 6, marginTop: 4 }}>
-                      {filter.district ? `District: ${filter.district} | ` : ''}
-                      {filter.status ? `Status: ${filter.status} | ` : ''}
-                      {filter.priority ? `Priority: ${filter.priority} | ` : ''}
-                      {filter.engineer ? `Engineer assigned | ` : ''}
-                      {filter.startDate ? `From: ${filter.startDate} | ` : ''}
-                      {filter.endDate ? `To: ${filter.endDate}` : ''}
-                      {!filter.district && !filter.status && !filter.priority && !filter.engineer && !filter.startDate && !filter.endDate ? 'All complaints (no active filters)' : ''}
-                    </div>
-                  </div>
-                  <button className="btn btn-primary mt-3" onClick={handleExport}>
-                    ⬇ Export {exportFormat.toUpperCase()} Report
-                  </button>
                 </div>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 6, display: 'block', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Current Filter Context</label>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '10px 14px', background: 'var(--bg-secondary, #f8fafc)', borderRadius: 8, lineHeight: 1.6 }}>
+                    {filter.district && <span style={{ display: 'inline-block', background: '#eef2ff', color: '#6366f1', padding: '2px 8px', borderRadius: 4, marginRight: 6, marginBottom: 4 }}>District: {filter.district}</span>}
+                    {filter.status && <span style={{ display: 'inline-block', background: '#f0fdf4', color: '#1A7A4A', padding: '2px 8px', borderRadius: 4, marginRight: 6, marginBottom: 4 }}>Status: {filter.status}</span>}
+                    {filter.priority && <span style={{ display: 'inline-block', background: '#fff7ed', color: '#E8741A', padding: '2px 8px', borderRadius: 4, marginRight: 6, marginBottom: 4 }}>Priority: {filter.priority}</span>}
+                    {filter.engineer && <span style={{ display: 'inline-block', background: '#f5f3ff', color: '#7C3AED', padding: '2px 8px', borderRadius: 4, marginRight: 6, marginBottom: 4 }}>Engineer assigned</span>}
+                    {filter.startDate && <span style={{ display: 'inline-block', background: '#fdf2f8', color: '#EC4899', padding: '2px 8px', borderRadius: 4, marginRight: 6, marginBottom: 4 }}>From: {filter.startDate}</span>}
+                    {filter.endDate && <span style={{ display: 'inline-block', background: '#fef3c7', color: '#B45309', padding: '2px 8px', borderRadius: 4, marginRight: 6, marginBottom: 4 }}>To: {filter.endDate}</span>}
+                    {!filter.district && !filter.status && !filter.priority && !filter.engineer && !filter.startDate && !filter.endDate && <span style={{ color: 'var(--text-muted)' }}>All complaints (no active filters)</span>}
+                  </div>
+                </div>
+                <button className="btn btn-primary" onClick={handleExport} style={{ padding: '10px 24px', borderRadius: 8 }}>
+                  <MaterialIcon name="download" size={18} /> Export {exportFormat.toUpperCase()} Report
+                </button>
               </div>
             </div>
           )}
@@ -929,17 +989,17 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
           {/* Seed Facilities */}
           {activeTab === 'seed' && (
             <div>
-              <h2 className="mb-2">Seed Health Facilities</h2>
-              <p className="text-muted mb-3">Paste your 666 facility JSON array below to load them into the database.</p>
-              <div className="card">
-                <div className="card-body">
-                  <div className="form-group">
-                    <label className="form-label">Facility JSON Array</label>
-                    <textarea className="form-control" rows={14} placeholder='[{"sno":1,"district":"Bokaro","facility_name":"...","facility_type":"DH","Lat ":23.61,"longitude":86.18,"facility_code":"..."}]' value={seedJson} onChange={e => setSeedJson(e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: '0.8rem' }} />
-                  </div>
-                  <button className="btn btn-primary" onClick={handleSeed}>Upload Facilities</button>
-                  {msg && <div className="alert alert-info mt-2">{msg}</div>}
+              <div style={{ marginBottom: 20 }}>
+                <h2 style={{ margin: 0, fontSize: '1.4rem' }}>Seed Health Facilities</h2>
+                <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>Paste your 666 facility JSON array below to load them into the database</p>
+              </div>
+              <div className="card" style={{ padding: 24 }}>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 6, display: 'block', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Facility JSON Array</label>
+                  <textarea className="form-control" rows={14} placeholder='[{"sno":1,"district":"Bokaro","facility_name":"...","facility_type":"DH","Lat ":23.61,"longitude":86.18,"facility_code":"..."}]' value={seedJson} onChange={e => setSeedJson(e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: '0.8rem' }} />
                 </div>
+                <button className="btn btn-primary" onClick={handleSeed} style={{ borderRadius: 6 }}>Upload Facilities</button>
+                {msg && <div className="alert alert-info mt-2">{msg}</div>}
               </div>
             </div>
           )}
@@ -947,10 +1007,10 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
           {/* Facility Notification Mapping */}
           {activeTab === 'mapping' && (
             <div>
-              <h2 className="mb-2">Facility Notification Mapping</h2>
-              <p className="text-muted mb-3">
-                Map each health facility to its field engineer and team lead. State head and ops manager receive every complaint.
-              </p>
+              <div style={{ marginBottom: 20 }}>
+                <h2 style={{ margin: 0, fontSize: '1.4rem' }}>Facility Notification Mapping</h2>
+                <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>Map each health facility to its field engineer and team lead. State head and ops manager receive every complaint.</p>
+              </div>
 
               <div className="card mb-3">
                 <div className="card-header"><span className="card-title">Always-notified Contacts</span></div>
@@ -994,27 +1054,33 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
                   <div className="grid-2">
                     <div className="form-group">
                       <label className="form-label">District</label>
-                      <select className="form-control" value={mappingForm.district} onChange={e => setMappingForm(v => ({ ...v, district: e.target.value, facilityType: '', facilityCode: '', facilityName: '' }))}>
-                        <option value="">Select district</option>
-                        {districtOptions.map(d => <option key={d} value={d}>{d}</option>)}
-                      </select>
+                      <div className="material-select-wrap">
+                        <select className="form-control" value={mappingForm.district} onChange={e => setMappingForm(v => ({ ...v, district: e.target.value, facilityType: '', facilityCode: '', facilityName: '' }))}>
+                          <option value="">Select district</option>
+                          {districtOptions.map(d => <option key={d} value={d}>{d}</option>)}
+                        </select>
+                      </div>
                     </div>
                     <div className="form-group">
                       <label className="form-label">Facility Type</label>
-                      <select className="form-control" value={mappingForm.facilityType} onChange={e => setMappingForm(v => ({ ...v, facilityType: e.target.value, facilityCode: '', facilityName: '' }))} disabled={!mappingForm.district}>
-                        <option value="">Select type</option>
-                        {facilityTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
-                      </select>
+                      <div className="material-select-wrap">
+                        <select className="form-control" value={mappingForm.facilityType} onChange={e => setMappingForm(v => ({ ...v, facilityType: e.target.value, facilityCode: '', facilityName: '' }))} disabled={!mappingForm.district}>
+                          <option value="">Select type</option>
+                          {facilityTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </div>
                     </div>
                     <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                       <label className="form-label">Health Facility</label>
-                      <select className="form-control" value={mappingForm.facilityCode} onChange={e => {
-                        const f = facilityOptions.find(x => x.facility_code === e.target.value);
-                        setMappingForm(v => ({ ...v, facilityCode: e.target.value, facilityName: f?.facility_name || '' }));
-                      }} disabled={!mappingForm.facilityType}>
-                        <option value="">Select facility</option>
-                        {facilityOptions.map(f => <option key={f.facility_code} value={f.facility_code}>{f.facility_name}</option>)}
-                      </select>
+                      <div className="material-select-wrap">
+                        <select className="form-control" value={mappingForm.facilityCode} onChange={e => {
+                          const f = facilityOptions.find(x => x.facility_code === e.target.value);
+                          setMappingForm(v => ({ ...v, facilityCode: e.target.value, facilityName: f?.facility_name || '' }));
+                        }} disabled={!mappingForm.facilityType}>
+                          <option value="">Select facility</option>
+                          {facilityOptions.map(f => <option key={f.facility_code} value={f.facility_code}>{f.facility_name}</option>)}
+                        </select>
+                      </div>
                     </div>
                     <div className="form-group">
                       <label className="form-label">Field Engineer Name</label>
@@ -1051,7 +1117,7 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
               <div className="card">
                 <div className="card-header"><span className="card-title">Current Mappings</span></div>
                 <div className="table-wrapper">
-                  <table>
+                  <table className="material-table">
                     <thead>
                       <tr>
                         <th>Facility</th>
@@ -1106,11 +1172,13 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
           {/* Unmapped Facilities */}
           {activeTab === 'unmapped' && (
             <div>
-              <h2 className="mb-2">Unmapped Health Facilities</h2>
-              <p className="text-muted mb-3">Facilities listed here do not have field engineer/team lead mapping yet.</p>
+              <div style={{ marginBottom: 20 }}>
+                <h2 style={{ margin: 0, fontSize: '1.4rem' }}>Unmapped Health Facilities</h2>
+                <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: 'var(--text-muted)' }}>Facilities listed here do not have field engineer/team lead mapping yet</p>
+              </div>
               <div className="card">
                 <div className="table-wrapper">
-                  <table>
+                  <table className="material-table">
                     <thead>
                       <tr>
                         <th>District</th>
@@ -1122,7 +1190,7 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
                     </thead>
                     <tbody>
                       {unmappedRows.length === 0 && (
-                        <tr><td colSpan={5}><div className="empty-state"><div className="empty-title">All facilities are mapped 🎉</div></div></td></tr>
+                        <tr><td colSpan={5}><div className="empty-state"><div className="empty-title">All facilities are mapped</div></div></td></tr>
                       )}
                       {visibleUnmappedRows.map(f => (
                         <tr key={f.facility_code}>
@@ -1153,11 +1221,11 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
 
       {/* Confirmation Modal */}
       {confirmAction && (
-        <div className="modal-overlay" onClick={() => setConfirmAction(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => setConfirmAction(null)} onKeyDown={e => { if (e.key === 'Escape') setConfirmAction(null); }}>
+          <div className="modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>{confirmAction.title}</h3>
-              <button className="btn btn-ghost btn-sm" onClick={() => setConfirmAction(null)}>✕</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setConfirmAction(null)}><MaterialIcon name="close" size={16} /></button>
             </div>
             <div className="modal-body">
               <p className="text-sm">{confirmAction.message}</p>
@@ -1172,20 +1240,22 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
 
       {/* Assign Modal */}
       {modal === 'assign' && (
-        <div className="modal-overlay" onClick={() => setModal(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => setModal(null)} onKeyDown={e => { if (e.key === 'Escape') setModal(null); }}>
+          <div className="modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Assign Engineer</h3>
-              <button className="btn btn-ghost btn-sm" onClick={() => setModal(null)}>✕</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setModal(null)}><MaterialIcon name="close" size={16} /></button>
             </div>
             <div className="modal-body">
               <p className="text-sm text-muted mb-2">Ticket: <strong>{selectedComplaint?.ticketId}</strong></p>
               <div className="form-group">
                 <label className="form-label">Select Engineer</label>
-                <select className="form-control" value={modalData.engineerId} onChange={e => setModalData(d => ({ ...d, engineerId: e.target.value }))}>
-                  <option value="">-- Select Engineer --</option>
-                  {engineers.map(e => <option key={e._id} value={e._id}>{e.name} ({e.assignedDistricts?.join(', ') || 'All'})</option>)}
-                </select>
+                <div className="material-select-wrap">
+                  <select className="form-control" value={modalData.engineerId} onChange={e => setModalData(d => ({ ...d, engineerId: e.target.value }))}>
+                    <option value="">-- Select Engineer --</option>
+                    {engineers.map(e => <option key={e._id} value={e._id}>{e.name} ({e.assignedDistricts?.join(', ') || 'All'})</option>)}
+                  </select>
+                </div>
               </div>
             </div>
             <div className="modal-footer">
@@ -1200,11 +1270,11 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
 
       {/* Status Modal */}
       {modal === 'status' && (
-        <div className="modal-overlay" onClick={() => setModal(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => setModal(null)} onKeyDown={e => { if (e.key === 'Escape') setModal(null); }}>
+          <div className="modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Update Status</h3>
-              <button className="btn btn-ghost btn-sm" onClick={() => setModal(null)}>✕</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setModal(null)}><MaterialIcon name="close" size={16} /></button>
             </div>
             <div className="modal-body">
               <p className="text-sm text-muted mb-2">Ticket: <strong>{selectedComplaint?.ticketId}</strong></p>
@@ -1232,22 +1302,26 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
                 <>
                   <div className="form-group">
                     <label className="form-label">New Status</label>
-                    <select className="form-control" value={modalData.status} onChange={e => setModalData(d => ({ ...d, status: e.target.value }))}>
-                      <option value="open">Open</option>
-                      <option value="in_progress">In Progress</option>
-                      <option value="resolved">Resolved</option>
-                      <option value="closed">Closed</option>
-                    </select>
+                    <div className="material-select-wrap">
+                      <select className="form-control" value={modalData.status} onChange={e => setModalData(d => ({ ...d, status: e.target.value }))}>
+                        <option value="open">Open</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="resolved">Resolved</option>
+                        <option value="closed">Closed</option>
+                      </select>
+                    </div>
                   </div>
                   <div className="form-group">
                     <label className="form-label">Priority</label>
-                    <select className="form-control" value={modalData.priority || ''} onChange={e => setModalData(d => ({ ...d, priority: e.target.value }))}>
-                      <option value="">No change</option>
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                      <option value="critical">Critical</option>
-                    </select>
+                    <div className="material-select-wrap">
+                      <select className="form-control" value={modalData.priority || ''} onChange={e => setModalData(d => ({ ...d, priority: e.target.value }))}>
+                        <option value="">No change</option>
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                        <option value="critical">Critical</option>
+                      </select>
+                    </div>
                   </div>
                   <div className="form-group">
                     <label className="form-label">Notes</label>
@@ -1268,11 +1342,11 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
 
       {/* New User Modal */}
       {modal === 'newUser' && (
-        <div className="modal-overlay" onClick={() => setModal(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => setModal(null)} onKeyDown={e => { if (e.key === 'Escape') setModal(null); }}>
+          <div className="modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Add New User</h3>
-              <button className="btn btn-ghost btn-sm" onClick={() => setModal(null)}>✕</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setModal(null)}><MaterialIcon name="close" size={16} /></button>
             </div>
             <div className="modal-body">
               {['name', 'email', 'password'].map(field => (
@@ -1283,12 +1357,27 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
               ))}
               <div className="form-group">
                 <label className="form-label">Role</label>
-                <select className="form-control" value={newUser.role} onChange={e => setNewUser(u => ({ ...u, role: e.target.value }))}>
-                  <option value="engineer">Engineer</option>
-                  <option value="admin">Admin</option>
-                  <option value="management">Management (View Only)</option>
-                </select>
+                <div className="material-select-wrap">
+                  <select className="form-control" value={newUser.role} onChange={e => setNewUser(u => ({ ...u, role: e.target.value }))}>
+                    <option value="engineer">Engineer</option>
+                    <option value="teamLead">Team Lead</option>
+                    <option value="admin">Admin</option>
+                    <option value="management">Management (View Only)</option>
+                  </select>
+                </div>
               </div>
+              {newUser.role === 'engineer' && (
+                <div className="form-group">
+                  <label className="form-label">Team Lead</label>
+                  <div className="material-select-wrap">
+                    <select className="form-control" value={newUser.teamLeadId} onChange={e => setNewUser(u => ({ ...u, teamLeadId: e.target.value }))}>
+                      <option value="">None</option>
+                      {teamLeadsList.map(tl => <option key={tl._id} value={tl._id}>{tl.name} ({tl.email})</option>)}
+                    </select>
+                  </div>
+                  <div className="form-hint">Assign this engineer to a team lead</div>
+                </div>
+              )}
               <div className="form-group">
                 <label className="form-label">Assigned Districts</label>
                 <input className="form-control" placeholder="e.g. Bokaro, Dhanbad (comma separated)" value={newUser.assignedDistricts} onChange={e => setNewUser(u => ({ ...u, assignedDistricts: e.target.value }))} />
@@ -1307,11 +1396,11 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
 
       {/* Edit User Modal */}
       {modal === 'editUser' && (
-        <div className="modal-overlay" onClick={() => setModal(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => setModal(null)} onKeyDown={e => { if (e.key === 'Escape') setModal(null); }}>
+          <div className="modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Edit User</h3>
-              <button className="btn btn-ghost btn-sm" onClick={() => setModal(null)}>✕</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setModal(null)}><MaterialIcon name="close" size={16} /></button>
             </div>
             <div className="modal-body">
               <div className="form-group">
@@ -1326,6 +1415,17 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
                 <label className="form-label">Role</label>
                 <input className="form-control" value={newUser.role} disabled style={{ background: '#F1F5F9' }} />
               </div>
+              {newUser.role === 'engineer' && (
+                <div className="form-group">
+                  <label className="form-label">Team Lead</label>
+                  <div className="material-select-wrap">
+                    <select className="form-control" value={newUser.teamLeadId || ''} onChange={e => setNewUser(u => ({ ...u, teamLeadId: e.target.value }))}>
+                      <option value="">None</option>
+                      {teamLeadsList.map(tl => <option key={tl._id} value={tl._id}>{tl.name} ({tl.email})</option>)}
+                    </select>
+                  </div>
+                </div>
+              )}
               <div className="form-group">
                 <label className="form-label">Assigned Districts</label>
                 <input className="form-control" placeholder="e.g. Bokaro, Dhanbad (comma separated)" value={newUser.assignedDistricts} onChange={e => setNewUser(u => ({ ...u, assignedDistricts: e.target.value }))} />
@@ -1333,7 +1433,7 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
               </div>
             </div>
             <div className="modal-footer">
-              <button className="btn btn-ghost" onClick={() => { setModal(null); setNewUser({ name: '', email: '', password: '', role: 'engineer', assignedDistricts: '' }); }}>Cancel</button>
+              <button className="btn btn-ghost" onClick={() => { setModal(null); setNewUser({ name: '', email: '', password: '', role: 'engineer', assignedDistricts: '', teamLeadId: '' }); }}>Cancel</button>
               <button className="btn btn-primary" onClick={handleEditUser} disabled={loading}>
                 {loading ? <span className="spinner" /> : 'Save Changes'}
               </button>
@@ -1341,6 +1441,8 @@ ${data.map(c => `<tr><td>${c.ticketId}</td><td>${c.userName}</td><td>${c.distric
           </div>
         </div>
       )}
+
+      {LogoutConfirmModal}
     </div>
   );
 }

@@ -260,6 +260,11 @@ router.get('/', protect, async (req, res) => {
       }
     }
 
+    // Team Lead must use /api/teamlead/complaints instead
+    if (req.user.role === "teamLead") {
+      return res.status(403).json({ message: 'Team leads must use /api/teamlead/complaints' });
+    }
+
     // Optional filters
     if (status) filter.status = status;
     if (district) filter.district = district;
@@ -492,6 +497,11 @@ router.patch('/:id/status', protect, async (req, res) => {
     // Engineer can only update complaints assigned to them
     if (req.user.role === 'engineer' && (!complaint.assignedTo || String(complaint.assignedTo) !== String(req.user._id))) {
       return res.status(403).json({ message: 'Access denied. This complaint is not assigned to you.' });
+    }
+
+    // Team Lead must use /api/teamlead/complaints/:id/status instead
+    if (req.user.role === 'teamLead') {
+      return res.status(403).json({ message: 'Team leads must use /api/teamlead/complaints/:id/status' });
     }
 
     // Resolved status requires OTP verification

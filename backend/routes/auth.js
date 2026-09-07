@@ -21,7 +21,7 @@ router.post('/login', async (req, res) => {
 
     res.json({
       token: generateToken(user._id),
-      user: { id: user._id, name: user.name, email: user.email, role: user.role, assignedDistricts: user.assignedDistricts }
+      user: { id: user._id, name: user.name, email: user.email, role: user.role, assignedDistricts: user.assignedDistricts, teamLeadId: user.teamLeadId }
     });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
@@ -31,11 +31,11 @@ router.post('/login', async (req, res) => {
 // POST /api/auth/register (admin only creates engineers/admins)
 router.post('/register', protect, requireRole('admin'), async (req, res) => {
   try {
-    const { name, email, password, role, assignedDistricts } = req.body;
+    const { name, email, password, role, assignedDistricts, teamLeadId } = req.body;
     const existing = await User.findOne({ email });
     if (existing) return res.status(400).json({ message: 'User already exists' });
 
-    const user = await User.create({ name, email, password, role, assignedDistricts: assignedDistricts || [] });
+    const user = await User.create({ name, email, password, role, assignedDistricts: assignedDistricts || [], teamLeadId: teamLeadId || null });
     res.status(201).json({ message: 'User created', user });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });

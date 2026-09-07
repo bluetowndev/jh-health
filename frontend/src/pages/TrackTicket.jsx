@@ -4,6 +4,9 @@ import Navbar from '../components/Navbar';
 import HomeHeroBanner from '../components/HomeHeroBanner';
 import PublicFooter from '../components/PublicFooter';
 import StatusBadge from '../components/StatusBadge';
+import EmptyState from '../components/EmptyState';
+import MaterialIcon from '../components/MaterialIcon';
+import { fmt } from '../utils/dates';
 
 export default function TrackTicket() {
   const [mode, setMode] = useState('email'); // 'email' | 'mobile' | 'ticketId'
@@ -65,7 +68,6 @@ export default function TrackTicket() {
     }
   };
 
-  const fmt = (d) => d ? new Date(d).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
   const fmtIssues = (cat) => {
     if (Array.isArray(cat)) return cat.length ? cat.join(', ') : '—';
     return cat || '—';
@@ -86,9 +88,9 @@ export default function TrackTicket() {
           <div className="card mb-3">
             <div className="card-body">
               <div className="track-tabs">
-                <button type="button" className={`track-tab ${mode === 'email' ? 'active' : ''}`} onClick={() => setMode('email')}>📧 Track by Email</button>
-                <button type="button" className={`track-tab ${mode === 'mobile' ? 'active' : ''}`} onClick={() => setMode('mobile')}>📱 Track by Mobile</button>
-                <button type="button" className={`track-tab ${mode === 'ticketId' ? 'active' : ''}`} onClick={() => setMode('ticketId')}>🎫 Track by Ticket ID</button>
+                <button type="button" className={`track-tab ${mode === 'email' ? 'active' : ''}`} onClick={() => setMode('email')}><MaterialIcon name="email" size={18} /> Track by Email</button>
+                <button type="button" className={`track-tab ${mode === 'mobile' ? 'active' : ''}`} onClick={() => setMode('mobile')}><MaterialIcon name="smartphone" size={18} /> Track by Mobile</button>
+                <button type="button" className={`track-tab ${mode === 'ticketId' ? 'active' : ''}`} onClick={() => setMode('ticketId')}><MaterialIcon name="confirmation_number" size={18} /> Track by Ticket ID</button>
               </div>
 
               {mode === 'email' ? (
@@ -111,7 +113,7 @@ export default function TrackTicket() {
                     disabled={loading}
                     style={{ flexShrink: 0 }}
                   >
-                    {loading ? <span className="spinner" /> : '🔍 Search'}
+                    {loading ? <span className="spinner" /> : <><MaterialIcon name="search" size={18} /> Search</>}
                   </button>
                 </div>
               ) : mode === 'mobile' ? (
@@ -134,7 +136,7 @@ export default function TrackTicket() {
                     disabled={loading}
                     style={{ flexShrink: 0 }}
                   >
-                    {loading ? <span className="spinner" /> : '🔍 Search'}
+                    {loading ? <span className="spinner" /> : <><MaterialIcon name="search" size={18} /> Search</>}
                   </button>
                 </div>
               ) : (
@@ -153,7 +155,7 @@ export default function TrackTicket() {
                     disabled={loading}
                     style={{ flexShrink: 0 }}
                   >
-                    {loading ? <span className="spinner" /> : '🔍 Search'}
+                    {loading ? <span className="spinner" /> : <><MaterialIcon name="search" size={18} /> Search</>}
                   </button>
                 </div>
               )}
@@ -179,13 +181,15 @@ export default function TrackTicket() {
               </div>
             </div>
           ) : complaints.length === 0 ? (
-            <div className="text-center text-muted" style={{ padding: '18px 0' }}>
-              No complaints found for the provided contact.
-            </div>
+            <EmptyState
+              icon="search"
+              title="No complaints found"
+              description="No complaints match the provided contact. Try a different email, mobile, or ticket ID."
+            />
           ) : (
             <div className="mb-3 text-sm" style={{ color: 'var(--gray-500)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span>Found <strong style={{ color: 'var(--primary)' }}>{complaints.length}</strong> complaint{complaints.length !== 1 ? 's' : ''}</span>
-              <button className="btn btn-ghost btn-sm" onClick={() => window.print()}>🖨️ Print</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => window.print()}><MaterialIcon name="print" size={18} /> Print</button>
             </div>
           )}
           <div className="fade-in-results">{!loading && complaints.length > 0 && complaints.map((complaint) => (

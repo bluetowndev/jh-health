@@ -81,7 +81,6 @@ complaintSchema.index({ mobile: 1 });
 complaintSchema.index({ status: 1, district: 1, createdAt: -1 });
 complaintSchema.index({ assignedTo: 1, status: 1 });
 complaintSchema.index({ createdAt: -1 });
-complaintSchema.index({ ticketId: 1 });
 complaintSchema.index({ facilityName: 1 });
 complaintSchema.index({ userName: 1 });
 

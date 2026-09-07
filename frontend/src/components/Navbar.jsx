@@ -1,4 +1,5 @@
 import useTheme from '../hooks/useTheme';
+import MaterialIcon from './MaterialIcon';
 
 export default function Navbar() {
   const { theme, toggleTheme } = useTheme();
@@ -10,7 +11,9 @@ export default function Navbar() {
           <span className="navbar-public-subtitle">स्वास्थ्य और संचार, हर कदम आपके साथ</span>
         </div>
         <div className="navbar-public-right">
-          <button type="button" className="theme-toggle-btn" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>{theme === 'dark' ? '☀️' : '🌙'}</button>
+          <button type="button" className="theme-toggle-btn" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
+            <MaterialIcon name={theme === 'dark' ? 'light_mode' : 'dark_mode'} size={20} />
+          </button>
         </div>
       </div>
     </nav>

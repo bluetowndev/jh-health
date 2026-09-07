@@ -3,24 +3,25 @@ import { getDistricts, getFacilityTypes, getFacilities, sendEmailOTP, verifyEmai
 import Navbar from '../components/Navbar';
 import HomeHeroBanner from '../components/HomeHeroBanner';
 import PublicFooter from '../components/PublicFooter';
+import MaterialIcon from '../components/MaterialIcon';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
 const ISSUES = [
-  { id: 'No Internet Connectivity', icon: '🔌', title: 'No Internet Connectivity', desc: 'Cannot access the internet at all' },
-  { id: 'Slow Internet Speed', icon: '🐢', title: 'Slow Internet Speed', desc: 'Internet is extremely slow or unusable' },
-  { id: 'Frequent Disconnections', icon: '🔄', title: 'Frequent Disconnections', desc: 'Connection drops repeatedly' },
-  { id: 'WiFi Not Visible / SSID Not Broadcasting', icon: '📡', title: 'WiFi Not Visible', desc: 'SSID not showing in available networks' },
-  { id: 'Unable to Connect to WiFi', icon: '🔒', title: 'Unable to Connect', desc: 'Password or authentication issues' },
-  { id: 'Limited Connectivity (Connected but No Internet)', icon: '⚠️', title: 'Limited Connectivity', desc: 'Connected to WiFi but no internet access' },
-  { id: 'Router / Access Point Not Working', icon: '📶', title: 'Device Not Working', desc: 'Router/Access point hardware issue' },
-  { id: 'Power Issue at Equipment', icon: '⚡', title: 'Power Issue', desc: 'Equipment has no power / power failure' },
-  { id: 'Other', icon: '💬', title: 'Other Issue', desc: 'Something else not listed above' },
+  { id: 'No Internet Connectivity', icon: 'power', title: 'No Internet Connectivity', desc: 'Cannot access the internet at all' },
+  { id: 'Slow Internet Speed', icon: 'speed', title: 'Slow Internet Speed', desc: 'Internet is extremely slow or unusable' },
+  { id: 'Frequent Disconnections', icon: 'sync', title: 'Frequent Disconnections', desc: 'Connection drops repeatedly' },
+  { id: 'WiFi Not Visible / SSID Not Broadcasting', icon: 'wifi', title: 'WiFi Not Visible', desc: 'SSID not showing in available networks' },
+  { id: 'Unable to Connect to WiFi', icon: 'lock', title: 'Unable to Connect', desc: 'Password or authentication issues' },
+  { id: 'Limited Connectivity (Connected but No Internet)', icon: 'warning', title: 'Limited Connectivity', desc: 'Connected to WiFi but no internet access' },
+  { id: 'Router / Access Point Not Working', icon: 'signal_wifi_4_bar', title: 'Device Not Working', desc: 'Router/Access point hardware issue' },
+  { id: 'Power Issue at Equipment', icon: 'bolt', title: 'Power Issue', desc: 'Equipment has no power / power failure' },
+  { id: 'Other', icon: 'chat_bubble_outline', title: 'Other Issue', desc: 'Something else not listed above' },
 ];
 
 const STEP_LABELS = ['Facility', 'Details', 'Issue', 'Confirm'];
 const COMPLAINT_DRAFT_KEY = 'complaintFormDraftV1';
-const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024; // 20KB
+const MAX_IMAGE_UPLOAD_BYTES = 500 * 1024;
 const INITIAL_FORM = {
   userName: '',
   mobile: '',
@@ -90,7 +91,7 @@ async function compressImageToLimit(file, maxBytes = MAX_IMAGE_UPLOAD_BYTES) {
     height *= 0.84;
   }
 
-  throw new Error('Image could not be compressed below 20KB.');
+  throw new Error('Image could not be compressed below 500KB.');
 }
 
 function ReportWifiBadge({ variant }) {
@@ -181,8 +182,7 @@ export default function Home() {
     setFacilityError('');
     getDistricts()
       .then(r => setDistricts(r.data || []))
-      .catch(err => {
-        console.error('Failed to load districts:', err);
+      .catch(() => {
         setFacilityError('Unable to load facilities. Please check your connection and try again.');
       });
   }, []);
@@ -310,10 +310,7 @@ export default function Home() {
 
     return false;
 
-  } catch (err) {
-
-    console.error(err);
-
+  } catch {
     return false;
 
   } finally {
@@ -464,7 +461,7 @@ export default function Home() {
         localStorage.setItem('trackEmail', (form.email || '').toLowerCase().trim());
         localStorage.setItem('trackMobile', (form.mobile || '').trim());
         setSubmitted({ ticketId: res.data.ticketId, isDuplicate: true });
-        toast(res.data.message || 'Complaint already exists.', { icon: 'ℹ️' });
+        toast(res.data.message || 'Complaint already exists.', { icon: 'info' });
         return;
       }
 
@@ -570,7 +567,7 @@ export default function Home() {
             <StepIndicator current={step} />
 
             <div className="complaint-form-shell complaint-form-shell--nested">
-              <div className="complaint-form-card complaint-form-card--nested">
+              <div className="complaint-form-card glass-form complaint-form-card--nested">
                 <div className="card-body">
             {/* Step 0: Facility Selection */}
             {step === 0 && (
@@ -579,11 +576,11 @@ export default function Home() {
                 {facilityError && <div className="alert alert-error mb-3">{facilityError}</div>}
                 <div className="form-group">
                   <div className="form-label-row">
-                    <span className="label-icon" aria-hidden>📍</span>
+                    <span className="label-icon" aria-hidden><MaterialIcon name="location_on" size={16} /></span>
                     <span>District <span className="req">*</span></span>
                   </div>
                   <div className="field-select-wrap">
-                    <span className="field-select-wrap__icon" aria-hidden>🔍</span>
+                    <span className="field-select-wrap__icon" aria-hidden><MaterialIcon name="search" size={18} /></span>
                     <select className="form-control" value={form.district} onChange={e => set('district', e.target.value)} aria-label="Select district">
                       <option value="">Select District</option>
                       {districts.map(d => <option key={d} value={d}>{d}</option>)}
@@ -593,11 +590,11 @@ export default function Home() {
                 </div>
                 <div className="form-group">
                   <div className="form-label-row">
-                    <span className="label-icon" aria-hidden>🏥</span>
+                    <span className="label-icon" aria-hidden><MaterialIcon name="local_hospital" size={16} /></span>
                     <span>Facility Type <span className="req">*</span></span>
                   </div>
                   <div className="field-select-wrap">
-                    <span className="field-select-wrap__icon" aria-hidden>🏢</span>
+                    <span className="field-select-wrap__icon" aria-hidden><MaterialIcon name="local_hospital" size={18} /></span>
                     <select className="form-control" value={form.facilityType} onChange={e => set('facilityType', e.target.value)} disabled={!form.district} aria-label="Select facility type">
                       <option value="">Select Type</option>
                       {facilityTypes.map(t => <option key={t} value={t}>{t}</option>)}
@@ -607,11 +604,11 @@ export default function Home() {
                 </div>
                 <div className="form-group">
                   <div className="form-label-row">
-                    <span className="label-icon" aria-hidden>🏥</span>
+                    <span className="label-icon" aria-hidden><MaterialIcon name="local_hospital" size={16} /></span>
                     <span>Health Facility <span className="req">*</span></span>
                   </div>
                   <div className="field-select-wrap">
-                    <span className="field-select-wrap__icon" aria-hidden>🔍</span>
+                    <span className="field-select-wrap__icon" aria-hidden><MaterialIcon name="search" size={18} /></span>
                     <select className="form-control" value={form.facilityCode} onChange={e => {
                       const fac = facilities.find(f => f.facility_code === e.target.value);
                       set('facilityCode', e.target.value);
@@ -664,7 +661,7 @@ export default function Home() {
                         {otpLoading && !otpSent ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Sending...</> : otpSent ? 'Resend OTP' : 'Send OTP'}
                       </button>
                     )}
-                    {emailVerified && <span style={{ color: 'var(--green-600)', fontWeight: 600, alignSelf: 'center' }}>✓ Verified</span>}
+                    {emailVerified && <span style={{ color: 'var(--green-600)', fontWeight: 600, alignSelf: 'center' }}><MaterialIcon name="check_circle" size={16} /> Verified</span>}
                   </div>
                   {errors.email && <div className="form-error">{errors.email}</div>}
                   {errors.emailVerify && <div className="form-error">{errors.emailVerify}</div>}
@@ -700,16 +697,18 @@ export default function Home() {
                       key={issue.id}
                       className={`issue-card ${form.issueCategory.includes(issue.id) ? 'selected' : ''}`}
                       onClick={() => toggleIssue(issue.id)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleIssue(issue.id); } }}
                       role="checkbox"
                       aria-checked={form.issueCategory.includes(issue.id)}
+                      tabIndex={0}
                     >
-                      <div className="issue-card-icon">{issue.icon}</div>
+                      <div className="issue-card-icon"><MaterialIcon name={issue.icon} size={24} /></div>
                       <div>
                         <div className="issue-card-title">{issue.title}</div>
                         <div className="issue-card-desc">{issue.desc}</div>
                       </div>
                       {form.issueCategory.includes(issue.id) && (
-                        <span className="issue-card-check" aria-hidden>✓</span>
+                        <span className="issue-card-check" aria-hidden><MaterialIcon name="check" size={16} /></span>
                       )}
                     </div>
                   ))}
@@ -717,7 +716,7 @@ export default function Home() {
                 <div className="form-group mt-3">
                   <label className="form-label">Additional Details <span className="text-muted" style={{ fontWeight: 400 }}>(Optional)</span></label>
                   <textarea className="form-control" rows={3} placeholder="Describe the issue in more detail..." maxLength={500} value={form.issueDescription} onChange={e => set('issueDescription', e.target.value)} style={{ resize: 'vertical' }} />
-                  <div className="char-counter">{form.issueDescription.length}/500</div>
+                  <div className="char-counter" style={form.issueDescription.length > 475 ? { color: '#ef4444' } : form.issueDescription.length > 400 ? { color: '#f97316' } : undefined}>{form.issueDescription.length}/500</div>
                 </div>
                 <div className="form-group mt-3">
                   <label className="form-label">Attach Images <span className="text-muted" style={{ fontWeight: 400 }}>(Optional, max 2)</span></label>
@@ -726,12 +725,12 @@ export default function Home() {
                     {(form.attachmentUrls || []).map((url, i) => (
                       <div key={i} className="image-upload-preview">
                         <img src={url} alt={`Attachment ${i + 1}`} />
-                        <button type="button" onClick={() => removeImage(i)} className="image-upload-remove" aria-label="Remove image">×</button>
+                        <button type="button" onClick={() => removeImage(i)} className="image-upload-remove" aria-label="Remove image"><MaterialIcon name="close" size={16} /></button>
                       </div>
                     ))}
                     {(form.attachmentUrls || []).length < 2 && (
                       <label className={`image-upload-add ${imageUploading ? 'disabled' : ''}`}>
-                        {imageUploading ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Uploading...</> : '📷 Add Image'}
+                        {imageUploading ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Uploading...</> : <> <MaterialIcon name="camera_alt" size={18} /> Add Image </>}
                         <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple style={{ display: 'none' }} onChange={handleImageSelect} disabled={imageUploading} />
                       </label>
                     )}
@@ -835,7 +834,7 @@ export default function Home() {
               ) : (
                 <span className="complaint-back-btn" />
               )}
-              <button type="button" className="btn btn-outline" onClick={resetForm}>
+              <button type="button" className="btn btn-outline" onClick={() => { if (window.confirm('Are you sure you want to reset? All entered data will be lost.')) resetForm(); }}>
                 Reset Form
               </button>
               {step < 3 ? (
@@ -849,7 +848,7 @@ export default function Home() {
                   onClick={handleSubmit}
                   disabled={loading || (duplicateCheck && !duplicateDismissed)}
                 >
-                  {loading ? <><span className="spinner" /> Submitting...</> : '✓ Submit Complaint'}
+                  {loading ? <><span className="spinner" /> Submitting...</> : <><MaterialIcon name="send" size={18} /> Submit Complaint</>}
                 </button>
               )}
             </div>

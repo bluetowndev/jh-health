@@ -1,4 +1,5 @@
 const NotificationDirectory = require('../models/NotificationDirectory');
+const User = require('../models/User');
 const {
   sendComplaintSummaryEmail,
   sendComplaintAlertEmail,
@@ -39,6 +40,19 @@ async function getStakeholderRecipients(complaint, { engineerEmail, excludeEmail
   addRecipient(mapping?.teamLead?.email);
   addRecipient(directory?.stateHead?.email);
   addRecipient(directory?.opsManager?.email);
+
+  // Fallback: if no TL from NotificationDirectory, look up via engineer's teamLeadId
+  if (!mapping?.teamLead?.email && complaint.assignedTo) {
+    try {
+      const engineer = await User.findById(complaint.assignedTo).select('teamLeadId');
+      if (engineer?.teamLeadId) {
+        const tl = await User.findById(engineer.teamLeadId).select('email');
+        if (tl?.email) addRecipient(tl.email);
+      }
+    } catch (err) {
+      console.error('Failed to look up TL via teamLeadId:', err.message);
+    }
+  }
 
   return [...recipientSet];
 }
