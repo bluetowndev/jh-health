@@ -5,6 +5,8 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import StatusBadge from '../components/StatusBadge';
 import MaterialIcon from '../components/MaterialIcon';
+import GlassSelect from '../components/GlassSelect';
+import GlassDatePicker from '../components/GlassDatePicker';
 import useTheme from '../hooks/useTheme';
 import { useLogoutConfirm } from '../hooks/useLogoutConfirm';
 import { STATUS_COLORS } from '../utils/constants';
@@ -353,46 +355,23 @@ ${rows.map(r => `<tr>${r.map(v => `<td>${escapeHtml(String(v ?? ''))}</td>`).joi
           </div>
           <div className="engineer-filter-group">
             <label className="form-label">District</label>
-            <div className="material-select-wrap">
-              <select className="form-control" value={filter.district}
-                onChange={e => { setFilter(f => ({ ...f, district: e.target.value })); setPage(1); }}>
-                <option value="">All Districts</option>
-                {districts.map(d => <option key={d} value={d}>{d}</option>)}
-              </select>
-            </div>
+            <GlassSelect value={filter.district} onChange={v => { setFilter(f => ({ ...f, district: v })); setPage(1); }} options={districts.map(d => ({ value: d, label: d }))} placeholder="All Districts" />
           </div>
           <div className="engineer-filter-group">
             <label className="form-label">Facility Type</label>
-            <div className="material-select-wrap">
-              <select className="form-control" value={filter.facilityType}
-                onChange={e => { setFilter(f => ({ ...f, facilityType: e.target.value })); setPage(1); }}>
-                <option value="">All Types</option>
-                {['DH','SDH','CHC','PHC','UPHC','HSC'].map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
+            <GlassSelect value={filter.facilityType} onChange={v => { setFilter(f => ({ ...f, facilityType: v })); setPage(1); }} options={[{value:'DH',label:'DH'},{value:'SDH',label:'SDH'},{value:'CHC',label:'CHC'},{value:'PHC',label:'PHC'},{value:'UPHC',label:'UPHC'},{value:'HSC',label:'HSC'}]} placeholder="All Types" />
           </div>
           <div className="engineer-filter-group">
             <label className="form-label">From</label>
-            <div className="material-date-wrap">
-              <input type="date" className="form-control" value={filter.startDate}
-                onChange={e => { setFilter(f => ({ ...f, startDate: e.target.value })); setPage(1); }} />
-            </div>
+            <GlassDatePicker value={filter.startDate} onChange={v => { setFilter(f => ({ ...f, startDate: v })); setPage(1); }} />
           </div>
           <div className="engineer-filter-group">
             <label className="form-label">To</label>
-            <div className="material-date-wrap">
-              <input type="date" className="form-control" value={filter.endDate}
-                onChange={e => { setFilter(f => ({ ...f, endDate: e.target.value })); setPage(1); }} />
-            </div>
+            <GlassDatePicker value={filter.endDate} onChange={v => { setFilter(f => ({ ...f, endDate: v })); setPage(1); }} />
           </div>
           <div className="engineer-filter-group">
             <label className="form-label">Sort</label>
-            <div className="material-select-wrap">
-              <select className="form-control" value={filter.sort}
-                onChange={e => setFilter(f => ({ ...f, sort: e.target.value }))}>
-                {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </div>
+            <GlassSelect value={filter.sort} onChange={v => setFilter(f => ({ ...f, sort: v }))} options={[{value:'createdAt:desc',label:'Newest'},{value:'createdAt:asc',label:'Oldest'},{value:'priority:desc',label:'Priority'}]} />
           </div>
           {hasActiveFilters && (
             <div className="engineer-filter-group engineer-filter-clear">
@@ -509,8 +488,8 @@ ${rows.map(r => `<tr>${r.map(v => `<td>${escapeHtml(String(v ?? ''))}</td>`).joi
               <div className="form-group">
                 <label className="form-label">Date Range (optional)</label>
                 <div className="flex gap-2">
-                  <div className="material-date-wrap"><input type="date" className="form-control" value={expStart} onChange={e => setExpStart(e.target.value)} disabled={exporting} placeholder="From" /></div>
-                  <div className="material-date-wrap"><input type="date" className="form-control" value={expEnd} onChange={e => setExpEnd(e.target.value)} disabled={exporting} placeholder="To" /></div>
+                  <GlassDatePicker value={expStart} onChange={v => setExpStart(v)} disabled={exporting} placeholder="From" />
+                  <GlassDatePicker value={expEnd} onChange={v => setExpEnd(v)} disabled={exporting} placeholder="To" />
                 </div>
                 <span className="text-xs text-muted" style={{ marginTop: 4, display: 'block' }}>Leave blank to export all assigned tickets</span>
               </div>
@@ -593,14 +572,7 @@ ${rows.map(r => `<tr>${r.map(v => `<td>${escapeHtml(String(v ?? ''))}</td>`).joi
                   <>
                     <div className="form-group">
                       <label className="form-label">Status</label>
-                      <div className="material-select-wrap">
-                        <select className="form-control" value={formData.status} onChange={e => setFormData(d => ({ ...d, status: e.target.value }))}>
-                          <option value="open">Open</option>
-                          <option value="in_progress">In Progress</option>
-                          <option value="resolved">Resolved</option>
-                          <option value="closed">Closed</option>
-                        </select>
-                      </div>
+                      <GlassSelect value={formData.status} onChange={v => setFormData(d => ({ ...d, status: v }))} options={[{value:'open',label:'Open'},{value:'in_progress',label:'In Progress'},{value:'resolved',label:'Resolved'},{value:'closed',label:'Closed'}]} />
                     </div>
                     <div className="form-group">
                       <label className="form-label">Work Notes</label>

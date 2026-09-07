@@ -6,6 +6,8 @@ import { getTeamLeadStats, getTeamLeadComplaints, tlAssignComplaint, tlUpdateCom
 import StatusBadge from '../components/StatusBadge';
 import EmptyState from '../components/EmptyState';
 import MaterialIcon from '../components/MaterialIcon';
+import GlassSelect from '../components/GlassSelect';
+import GlassDatePicker from '../components/GlassDatePicker';
 import { DashboardSkeleton } from '../components/Skeleton';
 import { NAV_ITEMS, STATUS_OPTIONS, PRIORITY_OPTIONS, PAGE_SIZES, PIE_COLORS, DISTRICT_COLORS } from '../utils/constants';
 import { fmt } from '../utils/dates';
@@ -523,26 +525,15 @@ export default function TeamLeadDashboard() {
                       </button>
                     ))}
                   </div>
-                  <div className="material-select-wrap"><select className="form-control" style={{ width: 72, fontSize: '0.8rem' }} value={limit} onChange={e => { setLimit(Number(e.target.value)); setPage(1); }}>
-                    {PAGE_SIZES.map(s => <option key={s} value={s}>{s} / page</option>)}
-                  </select></div>
+                  <GlassSelect value={String(limit)} onChange={v => { setLimit(Number(v)); setPage(1); }} options={PAGE_SIZES.map(s => ({ value: String(s), label: `${s} / page` }))} style={{ width: 72, fontSize: '0.8rem' }} />
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <input className="form-control" style={{ flex: '1 1 160px', fontSize: '0.85rem' }} placeholder="Search ticket/facility..." value={filter.search} onChange={e => updateFilter('search', e.target.value)} />
-                  <div className="material-select-wrap"><select className="form-control" style={{ flex: '1 1 130px', fontSize: '0.85rem' }} value={filter.district} onChange={e => updateFilter('district', e.target.value)}>
-                    <option value="">All Districts</option>
-                    {tlDistricts.map(d => <option key={d} value={d}>{d}</option>)}
-                  </select></div>
-                  <div className="material-select-wrap"><select className="form-control" style={{ flex: '1 1 130px', fontSize: '0.85rem' }} value={filter.priority} onChange={e => updateFilter('priority', e.target.value)}>
-                    <option value="">All Priority</option>
-                    {PRIORITY_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
-                  </select></div>
-                  <div className="material-select-wrap"><select className="form-control" style={{ flex: '1 1 130px', fontSize: '0.85rem' }} value={filter.engineer} onChange={e => updateFilter('engineer', e.target.value)}>
-                    <option value="">All Engineers</option>
-                    {teamMembers.map(e => <option key={e._id} value={e._id}>{e.name}</option>)}
-                  </select></div>
-                  <div className="material-date-wrap"><input className="form-control" style={{ flex: '1 1 120px', fontSize: '0.85rem' }} type="date" value={filter.startDate} onChange={e => updateFilter('startDate', e.target.value)} /></div>
-                  <div className="material-date-wrap"><input className="form-control" style={{ flex: '1 1 120px', fontSize: '0.85rem' }} type="date" value={filter.endDate} onChange={e => updateFilter('endDate', e.target.value)} /></div>
+                  <GlassSelect value={filter.district} onChange={v => updateFilter('district', v)} options={[{ value: '', label: 'All Districts' }, ...tlDistricts.map(d => ({ value: d, label: d }))]} style={{ flex: '1 1 130px', fontSize: '0.85rem' }} />
+                  <GlassSelect value={filter.priority} onChange={v => updateFilter('priority', v)} options={[{ value: '', label: 'All Priority' }, ...PRIORITY_OPTIONS.map(p => ({ value: p, label: p }))]} style={{ flex: '1 1 130px', fontSize: '0.85rem' }} />
+                  <GlassSelect value={filter.engineer} onChange={v => updateFilter('engineer', v)} options={[{ value: '', label: 'All Engineers' }, ...teamMembers.map(e => ({ value: e._id, label: e.name }))]} style={{ flex: '1 1 130px', fontSize: '0.85rem' }} />
+                  <GlassDatePicker value={filter.startDate} onChange={v => updateFilter('startDate', v)} style={{ flex: '1 1 120px', fontSize: '0.85rem' }} />
+                  <GlassDatePicker value={filter.endDate} onChange={v => updateFilter('endDate', v)} style={{ flex: '1 1 120px', fontSize: '0.85rem' }} />
                   <button className="btn btn-outline btn-sm" onClick={() => { setFilter({ status: '', district: '', priority: '', engineer: '', search: '', startDate: '', endDate: '' }); setPage(1); }} style={{ fontSize: '0.8rem' }}>Clear</button>
                 </div>
               </div>
@@ -811,19 +802,19 @@ export default function TeamLeadDashboard() {
               <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: 16 }}>District: <strong>{assignModal.district}</strong></p>
               <div className="form-group">
                 <label className="form-label">Select Engineer ({assignModal.district} district)</label>
-                <div className="material-select-wrap">
-                  <select className="form-control" value={assignEngineer} onChange={e => setAssignEngineer(e.target.value)}>
-                    <option value="">-- Select --</option>
-                    {teamMembers
+                <GlassSelect
+                  value={assignEngineer}
+                  onChange={v => setAssignEngineer(v)}
+                  options={[
+                    { value: '', label: '-- Select --' },
+                    ...teamMembers
                       .filter(e => {
                         const engDistricts = e.assignedDistricts || [];
                         return engDistricts.length === 0 || engDistricts.includes(assignModal.district);
                       })
-                      .map(e => (
-                        <option key={e._id} value={e._id}>{e.name} ({e.assignedDistricts?.join(', ') || 'All districts'})</option>
-                      ))}
-                  </select>
-                </div>
+                      .map(e => ({ value: e._id, label: `${e.name} (${e.assignedDistricts?.join(', ') || 'All districts'})` }))
+                  ]}
+                />
               </div>
             </div>
             <div className="modal-footer">
@@ -850,20 +841,11 @@ export default function TeamLeadDashboard() {
                 <>
                   <div className="form-group">
                     <label className="form-label">New Status</label>
-                    <div className="material-select-wrap">
-                      <select className="form-control" value={statusForm.status} onChange={e => setStatusForm(f => ({ ...f, status: e.target.value }))}>
-                        <option value="">-- Select --</option>
-                        {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
+                    <GlassSelect value={statusForm.status} onChange={v => setStatusForm(f => ({ ...f, status: v }))} options={[{ value: '', label: '-- Select --' }, ...STATUS_OPTIONS.map(s => ({ value: s, label: s }))]} />
                   </div>
                   <div className="form-group">
                     <label className="form-label">Priority</label>
-                    <div className="material-select-wrap">
-                      <select className="form-control" value={statusForm.priority} onChange={e => setStatusForm(f => ({ ...f, priority: e.target.value }))}>
-                        {PRIORITY_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
-                      </select>
-                    </div>
+                    <GlassSelect value={statusForm.priority} onChange={v => setStatusForm(f => ({ ...f, priority: v }))} options={PRIORITY_OPTIONS.map(p => ({ value: p, label: p }))} />
                   </div>
                   <div className="form-group">
                     <label className="form-label">Notes</label>

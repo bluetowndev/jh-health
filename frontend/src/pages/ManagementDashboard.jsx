@@ -15,6 +15,8 @@ import useTheme from '../hooks/useTheme';
 import { useLogoutConfirm } from '../hooks/useLogoutConfirm';
 import { STATUS_COLORS, CHART_COLORS } from '../utils/constants';
 import { fmt } from '../utils/dates';
+import GlassSelect from '../components/GlassSelect';
+import GlassDatePicker from '../components/GlassDatePicker';
 
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
@@ -533,28 +535,19 @@ ${data.map(c => `<tr><td>${escapeHtml(c.ticketId)}</td><td>${escapeHtml(c.distri
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, alignItems: 'end' }}>
                   <div className="material-date-wrap">
                     <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block', fontWeight: 500 }}>Start Date</label>
-                    <input type="date" className="form-control" value={filters.startDate} onChange={e => handleFilterChange('startDate', e.target.value)} style={{ fontSize: '0.8rem' }} />
+                    <GlassDatePicker value={filters.startDate} onChange={v => handleFilterChange('startDate', v)} style={{ fontSize: '0.8rem' }} />
                   </div>
                   <div className="material-date-wrap">
                     <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block', fontWeight: 500 }}>End Date</label>
-                    <input type="date" className="form-control" value={filters.endDate} onChange={e => handleFilterChange('endDate', e.target.value)} style={{ fontSize: '0.8rem' }} />
+                    <GlassDatePicker value={filters.endDate} onChange={v => handleFilterChange('endDate', v)} style={{ fontSize: '0.8rem' }} />
                   </div>
                   <div className="material-select-wrap">
                     <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block', fontWeight: 500 }}>District</label>
-                    <select className="form-control" value={filters.district} onChange={e => handleFilterChange('district', e.target.value)} style={{ fontSize: '0.8rem' }}>
-                      <option value="">All</option>
-                      {districtList.map(d => <option key={d} value={d}>{d}</option>)}
-                    </select>
+                    <GlassSelect value={filters.district} onChange={v => handleFilterChange('district', v)} options={districtList.map(d => ({ value: d, label: d }))} placeholder="All" style={{ fontSize: '0.8rem' }} />
                   </div>
                   <div className="material-select-wrap">
                     <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 4, display: 'block', fontWeight: 500 }}>Priority</label>
-                    <select className="form-control" value={filters.priority} onChange={e => handleFilterChange('priority', e.target.value)} style={{ fontSize: '0.8rem' }}>
-                      <option value="">All</option>
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                      <option value="critical">Critical</option>
-                    </select>
+                    <GlassSelect value={filters.priority} onChange={v => handleFilterChange('priority', v)} options={[{value:'low',label:'Low'},{value:'medium',label:'Medium'},{value:'high',label:'High'},{value:'critical',label:'Critical'}]} placeholder="All" style={{ fontSize: '0.8rem' }} />
                   </div>
                   <div>
                     <button className="btn btn-outline btn-sm" onClick={clearFilters} style={{ fontSize: '0.78rem', borderRadius: 6 }}>Clear Filters</button>
@@ -720,32 +713,14 @@ ${data.map(c => `<tr><td>${escapeHtml(c.ticketId)}</td><td>${escapeHtml(c.distri
                   <input type="text" className="form-control" placeholder="Search ticket ID, district, facility..."
                     value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                     style={{ flex: '1 1 200px', fontSize: '0.85rem' }} />
-                  <div className="material-select-wrap">
-                    <select className="form-control" style={{ flex: '1 1 130px', fontSize: '0.85rem' }} value={filters.district} onChange={e => handleFilterChange('district', e.target.value)}>
-                      <option value="">All Districts</option>
-                      {districtList.map(d => <option key={d} value={d}>{d}</option>)}
-                    </select>
-                  </div>
-                  <div className="material-select-wrap">
-                    <select className="form-control" style={{ flex: '1 1 130px', fontSize: '0.85rem' }} value={filters.priority} onChange={e => handleFilterChange('priority', e.target.value)}>
-                      <option value="">All Priority</option>
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                      <option value="critical">Critical</option>
-                    </select>
-                  </div>
-                  <div className="material-select-wrap">
-                    <select className="form-control" style={{ flex: '1 1 130px', fontSize: '0.85rem' }} value={filters.engineer} onChange={e => handleFilterChange('engineer', e.target.value)}>
-                      <option value="">All Engineers</option>
-                      {engineerList.map(eng => <option key={eng._id} value={eng._id}>{eng.name}</option>)}
-                    </select>
+                  <GlassSelect value={filters.district} onChange={v => handleFilterChange('district', v)} options={districtList.map(d => ({ value: d, label: d }))} placeholder="All Districts" style={{ flex: '1 1 130px', fontSize: '0.85rem' }} />
+                  <GlassSelect value={filters.priority} onChange={v => handleFilterChange('priority', v)} options={[{value:'low',label:'Low'},{value:'medium',label:'Medium'},{value:'high',label:'High'},{value:'critical',label:'Critical'}]} placeholder="All Priority" style={{ flex: '1 1 130px', fontSize: '0.85rem' }} />
+                  <GlassSelect value={filters.engineer} onChange={v => handleFilterChange('engineer', v)} options={engineerList.map(eng => ({ value: eng._id, label: eng.name }))} placeholder="All Engineers" style={{ flex: '1 1 130px', fontSize: '0.85rem' }} />
+                  <div className="material-date-wrap">
+                    <GlassDatePicker value={filters.startDate} onChange={v => handleFilterChange('startDate', v)} style={{ flex: '1 1 120px', fontSize: '0.85rem' }} />
                   </div>
                   <div className="material-date-wrap">
-                    <input type="date" className="form-control" value={filters.startDate} onChange={e => handleFilterChange('startDate', e.target.value)} style={{ flex: '1 1 120px', fontSize: '0.85rem' }} />
-                  </div>
-                  <div className="material-date-wrap">
-                    <input type="date" className="form-control" value={filters.endDate} onChange={e => handleFilterChange('endDate', e.target.value)} style={{ flex: '1 1 120px', fontSize: '0.85rem' }} />
+                    <GlassDatePicker value={filters.endDate} onChange={v => handleFilterChange('endDate', v)} style={{ flex: '1 1 120px', fontSize: '0.85rem' }} />
                   </div>
                   <button className="btn btn-outline btn-sm" onClick={clearFilters} style={{ fontSize: '0.78rem' }}>Clear</button>
                 </div>

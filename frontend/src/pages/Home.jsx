@@ -3,6 +3,7 @@ import { getDistricts, getFacilityTypes, getFacilities, sendEmailOTP, verifyEmai
 import Navbar from '../components/Navbar';
 import HomeHeroBanner from '../components/HomeHeroBanner';
 import PublicFooter from '../components/PublicFooter';
+import GlassSelect from '../components/GlassSelect';
 import MaterialIcon from '../components/MaterialIcon';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
@@ -581,10 +582,7 @@ export default function Home() {
                   </div>
                   <div className="field-select-wrap">
                     <span className="field-select-wrap__icon" aria-hidden><MaterialIcon name="search" size={18} /></span>
-                    <select className="form-control" value={form.district} onChange={e => set('district', e.target.value)} aria-label="Select district">
-                      <option value="">Select District</option>
-                      {districts.map(d => <option key={d} value={d}>{d}</option>)}
-                    </select>
+                    <GlassSelect value={form.district} onChange={v => set('district', v)} options={districts.map(d => ({ value: d, label: d }))} placeholder="Select District" aria-label="Select district" />
                   </div>
                   {errors.district && <div className="form-error">{errors.district}</div>}
                 </div>
@@ -595,10 +593,7 @@ export default function Home() {
                   </div>
                   <div className="field-select-wrap">
                     <span className="field-select-wrap__icon" aria-hidden><MaterialIcon name="local_hospital" size={18} /></span>
-                    <select className="form-control" value={form.facilityType} onChange={e => set('facilityType', e.target.value)} disabled={!form.district} aria-label="Select facility type">
-                      <option value="">Select Type</option>
-                      {facilityTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
+                    <GlassSelect value={form.facilityType} onChange={v => set('facilityType', v)} options={facilityTypes.map(t => ({ value: t, label: t }))} placeholder="Select Type" disabled={!form.district} aria-label="Select facility type" />
                   </div>
                   {errors.facilityType && <div className="form-error">{errors.facilityType}</div>}
                 </div>
@@ -609,14 +604,11 @@ export default function Home() {
                   </div>
                   <div className="field-select-wrap">
                     <span className="field-select-wrap__icon" aria-hidden><MaterialIcon name="search" size={18} /></span>
-                    <select className="form-control" value={form.facilityCode} onChange={e => {
-                      const fac = facilities.find(f => f.facility_code === e.target.value);
-                      set('facilityCode', e.target.value);
+                    <GlassSelect value={form.facilityCode} onChange={v => {
+                      const fac = facilities.find(f => f.facility_code === v);
+                      set('facilityCode', v);
                       set('facilityName', fac?.facility_name || '');
-                    }} disabled={!form.facilityType} aria-label="Select health facility">
-                      <option value="">Select Facility</option>
-                      {facilities.map(f => <option key={f.facility_code} value={f.facility_code}>{f.facility_name}</option>)}
-                    </select>
+                    }} options={facilities.map(f => ({ value: f.facility_code, label: f.facility_name }))} placeholder="Select Facility" disabled={!form.facilityType} aria-label="Select health facility" />
                   </div>
                   {errors.facilityCode && <div className="form-error">{errors.facilityCode}</div>}
                 </div>

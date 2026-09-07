@@ -30,6 +30,8 @@ import EmptyState from '../components/EmptyState';
 import MaterialIcon from '../components/MaterialIcon';
 import useTheme from '../hooks/useTheme';
 import { useLogoutConfirm } from '../hooks/useLogoutConfirm';
+import GlassSelect from '../components/GlassSelect';
+import GlassDatePicker from '../components/GlassDatePicker';
 import { STATUS_COLORS, CHART_COLORS } from '../utils/constants';
 import { fmt } from '../utils/dates';
 
@@ -743,32 +745,52 @@ ${data.map(c => `<tr><td>${escapeHtml(c.ticketId)}</td><td>${escapeHtml(c.userNa
                   <input className="form-control" placeholder="Search ticket, facility..." value={localSearch}
                     onChange={e => { const val = e.target.value; setLocalSearch(val); clearTimeout(searchTimerRef.current); searchTimerRef.current = setTimeout(() => { setFilter(f => ({ ...f, search: val })); setPage(1); }, 300); }}
                     style={{ flex: '1 1 180px', fontSize: '0.85rem' }} />
-                  <div className="material-select-wrap" style={{ flex: '1 1 130px' }}>
-                    <select className="form-control" style={{ width: '100%', fontSize: '0.85rem' }} value={filter.district} onChange={e => { setFilter(f => ({ ...f, district: e.target.value })); setPage(1); }}>
-                      <option value="">All Districts</option>
-                      {districtOptions.map(d => <option key={d} value={d}>{d}</option>)}
-                    </select>
+                  <div style={{ flex: '1 1 130px' }}>
+                    <GlassSelect
+                      value={filter.district}
+                      onChange={v => { setFilter(f => ({ ...f, district: v })); setPage(1); }}
+                      options={districtOptions.map(d => ({ value: d, label: d }))}
+                      placeholder="All Districts"
+                      style={{ width: '100%', fontSize: '0.85rem' }}
+                    />
                   </div>
-                  <div className="material-select-wrap" style={{ flex: '1 1 130px' }}>
-                    <select className="form-control" style={{ width: '100%', fontSize: '0.85rem' }} value={filter.priority} onChange={e => { setFilter(f => ({ ...f, priority: e.target.value })); setPage(1); }}>
-                      <option value="">All Priority</option>
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                      <option value="critical">Critical</option>
-                    </select>
+                  <div style={{ flex: '1 1 130px' }}>
+                    <GlassSelect
+                      value={filter.priority}
+                      onChange={v => { setFilter(f => ({ ...f, priority: v })); setPage(1); }}
+                      options={[
+                        { value: '', label: 'All Priority' },
+                        { value: 'low', label: 'Low' },
+                        { value: 'medium', label: 'Medium' },
+                        { value: 'high', label: 'High' },
+                        { value: 'critical', label: 'Critical' },
+                      ]}
+                      placeholder="All Priority"
+                      style={{ width: '100%', fontSize: '0.85rem' }}
+                    />
                   </div>
-                  <div className="material-select-wrap" style={{ flex: '1 1 130px' }}>
-                    <select className="form-control" style={{ width: '100%', fontSize: '0.85rem' }} value={filter.engineer} onChange={e => { setFilter(f => ({ ...f, engineer: e.target.value })); setPage(1); }}>
-                      <option value="">All Engineers</option>
-                      {engineers.map(eng => <option key={eng._id} value={eng._id}>{eng.name}</option>)}
-                    </select>
+                  <div style={{ flex: '1 1 130px' }}>
+                    <GlassSelect
+                      value={filter.engineer}
+                      onChange={v => { setFilter(f => ({ ...f, engineer: v })); setPage(1); }}
+                      options={engineers.map(eng => ({ value: eng._id, label: eng.name }))}
+                      placeholder="All Engineers"
+                      style={{ width: '100%', fontSize: '0.85rem' }}
+                    />
                   </div>
-                  <div className="material-date-wrap" style={{ flex: '1 1 120px' }}>
-                    <input type="date" className="form-control" value={filter.startDate} onChange={e => { setFilter(f => ({ ...f, startDate: e.target.value })); setPage(1); }} style={{ width: '100%', fontSize: '0.85rem' }} />
+                  <div style={{ flex: '1 1 120px' }}>
+                    <GlassDatePicker
+                      value={filter.startDate}
+                      onChange={v => { setFilter(f => ({ ...f, startDate: v })); setPage(1); }}
+                      style={{ width: '100%', fontSize: '0.85rem' }}
+                    />
                   </div>
-                  <div className="material-date-wrap" style={{ flex: '1 1 120px' }}>
-                    <input type="date" className="form-control" value={filter.endDate} onChange={e => { setFilter(f => ({ ...f, endDate: e.target.value })); setPage(1); }} style={{ width: '100%', fontSize: '0.85rem' }} />
+                  <div style={{ flex: '1 1 120px' }}>
+                    <GlassDatePicker
+                      value={filter.endDate}
+                      onChange={v => { setFilter(f => ({ ...f, endDate: v })); setPage(1); }}
+                      style={{ width: '100%', fontSize: '0.85rem' }}
+                    />
                   </div>
                   <button className="btn btn-outline btn-sm" onClick={() => { setFilter({ status: '', district: '', priority: '', engineer: '', startDate: '', endDate: '', issueCategory: '', search: '' }); setLocalSearch(''); setPage(1); }} style={{ fontSize: '0.78rem' }}>Clear</button>
                 </div>
@@ -1054,33 +1076,35 @@ ${data.map(c => `<tr><td>${escapeHtml(c.ticketId)}</td><td>${escapeHtml(c.userNa
                   <div className="grid-2">
                     <div className="form-group">
                       <label className="form-label">District</label>
-                      <div className="material-select-wrap">
-                        <select className="form-control" value={mappingForm.district} onChange={e => setMappingForm(v => ({ ...v, district: e.target.value, facilityType: '', facilityCode: '', facilityName: '' }))}>
-                          <option value="">Select district</option>
-                          {districtOptions.map(d => <option key={d} value={d}>{d}</option>)}
-                        </select>
-                      </div>
+                      <GlassSelect
+                        value={mappingForm.district}
+                        onChange={v => setMappingForm(v2 => ({ ...v2, district: v, facilityType: '', facilityCode: '', facilityName: '' }))}
+                        options={districtOptions.map(d => ({ value: d, label: d }))}
+                        placeholder="Select district"
+                      />
                     </div>
                     <div className="form-group">
                       <label className="form-label">Facility Type</label>
-                      <div className="material-select-wrap">
-                        <select className="form-control" value={mappingForm.facilityType} onChange={e => setMappingForm(v => ({ ...v, facilityType: e.target.value, facilityCode: '', facilityName: '' }))} disabled={!mappingForm.district}>
-                          <option value="">Select type</option>
-                          {facilityTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                      </div>
+                      <GlassSelect
+                        value={mappingForm.facilityType}
+                        onChange={v => setMappingForm(v2 => ({ ...v2, facilityType: v, facilityCode: '', facilityName: '' }))}
+                        options={facilityTypeOptions.map(t => ({ value: t, label: t }))}
+                        placeholder="Select type"
+                        disabled={!mappingForm.district}
+                      />
                     </div>
                     <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                       <label className="form-label">Health Facility</label>
-                      <div className="material-select-wrap">
-                        <select className="form-control" value={mappingForm.facilityCode} onChange={e => {
-                          const f = facilityOptions.find(x => x.facility_code === e.target.value);
-                          setMappingForm(v => ({ ...v, facilityCode: e.target.value, facilityName: f?.facility_name || '' }));
-                        }} disabled={!mappingForm.facilityType}>
-                          <option value="">Select facility</option>
-                          {facilityOptions.map(f => <option key={f.facility_code} value={f.facility_code}>{f.facility_name}</option>)}
-                        </select>
-                      </div>
+                      <GlassSelect
+                        value={mappingForm.facilityCode}
+                        onChange={v => {
+                          const f = facilityOptions.find(x => x.facility_code === v);
+                          setMappingForm(v2 => ({ ...v2, facilityCode: v, facilityName: f?.facility_name || '' }));
+                        }}
+                        options={facilityOptions.map(f => ({ value: f.facility_code, label: f.facility_name }))}
+                        placeholder="Select facility"
+                        disabled={!mappingForm.facilityType}
+                      />
                     </div>
                     <div className="form-group">
                       <label className="form-label">Field Engineer Name</label>
@@ -1250,12 +1274,12 @@ ${data.map(c => `<tr><td>${escapeHtml(c.ticketId)}</td><td>${escapeHtml(c.userNa
               <p className="text-sm text-muted mb-2">Ticket: <strong>{selectedComplaint?.ticketId}</strong></p>
               <div className="form-group">
                 <label className="form-label">Select Engineer</label>
-                <div className="material-select-wrap">
-                  <select className="form-control" value={modalData.engineerId} onChange={e => setModalData(d => ({ ...d, engineerId: e.target.value }))}>
-                    <option value="">-- Select Engineer --</option>
-                    {engineers.map(e => <option key={e._id} value={e._id}>{e.name} ({e.assignedDistricts?.join(', ') || 'All'})</option>)}
-                  </select>
-                </div>
+                <GlassSelect
+                  value={modalData.engineerId}
+                  onChange={v => setModalData(d => ({ ...d, engineerId: v }))}
+                  options={engineers.map(e => ({ value: e._id, label: `${e.name} (${e.assignedDistricts?.join(', ') || 'All'})` }))}
+                  placeholder="-- Select Engineer --"
+                />
               </div>
             </div>
             <div className="modal-footer">
@@ -1302,26 +1326,32 @@ ${data.map(c => `<tr><td>${escapeHtml(c.ticketId)}</td><td>${escapeHtml(c.userNa
                 <>
                   <div className="form-group">
                     <label className="form-label">New Status</label>
-                    <div className="material-select-wrap">
-                      <select className="form-control" value={modalData.status} onChange={e => setModalData(d => ({ ...d, status: e.target.value }))}>
-                        <option value="open">Open</option>
-                        <option value="in_progress">In Progress</option>
-                        <option value="resolved">Resolved</option>
-                        <option value="closed">Closed</option>
-                      </select>
-                    </div>
+                    <GlassSelect
+                      value={modalData.status}
+                      onChange={v => setModalData(d => ({ ...d, status: v }))}
+                      options={[
+                        { value: 'open', label: 'Open' },
+                        { value: 'in_progress', label: 'In Progress' },
+                        { value: 'resolved', label: 'Resolved' },
+                        { value: 'closed', label: 'Closed' },
+                      ]}
+                      placeholder="Select status"
+                    />
                   </div>
                   <div className="form-group">
                     <label className="form-label">Priority</label>
-                    <div className="material-select-wrap">
-                      <select className="form-control" value={modalData.priority || ''} onChange={e => setModalData(d => ({ ...d, priority: e.target.value }))}>
-                        <option value="">No change</option>
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                        <option value="critical">Critical</option>
-                      </select>
-                    </div>
+                    <GlassSelect
+                      value={modalData.priority || ''}
+                      onChange={v => setModalData(d => ({ ...d, priority: v }))}
+                      options={[
+                        { value: '', label: 'No change' },
+                        { value: 'low', label: 'Low' },
+                        { value: 'medium', label: 'Medium' },
+                        { value: 'high', label: 'High' },
+                        { value: 'critical', label: 'Critical' },
+                      ]}
+                      placeholder="No change"
+                    />
                   </div>
                   <div className="form-group">
                     <label className="form-label">Notes</label>
@@ -1357,24 +1387,27 @@ ${data.map(c => `<tr><td>${escapeHtml(c.ticketId)}</td><td>${escapeHtml(c.userNa
               ))}
               <div className="form-group">
                 <label className="form-label">Role</label>
-                <div className="material-select-wrap">
-                  <select className="form-control" value={newUser.role} onChange={e => setNewUser(u => ({ ...u, role: e.target.value }))}>
-                    <option value="engineer">Engineer</option>
-                    <option value="teamLead">Team Lead</option>
-                    <option value="admin">Admin</option>
-                    <option value="management">Management (View Only)</option>
-                  </select>
-                </div>
+                <GlassSelect
+                  value={newUser.role}
+                  onChange={v => setNewUser(u => ({ ...u, role: v }))}
+                  options={[
+                    { value: 'engineer', label: 'Engineer' },
+                    { value: 'teamLead', label: 'Team Lead' },
+                    { value: 'admin', label: 'Admin' },
+                    { value: 'management', label: 'Management (View Only)' },
+                  ]}
+                  placeholder="Select role"
+                />
               </div>
               {newUser.role === 'engineer' && (
                 <div className="form-group">
                   <label className="form-label">Team Lead</label>
-                  <div className="material-select-wrap">
-                    <select className="form-control" value={newUser.teamLeadId} onChange={e => setNewUser(u => ({ ...u, teamLeadId: e.target.value }))}>
-                      <option value="">None</option>
-                      {teamLeadsList.map(tl => <option key={tl._id} value={tl._id}>{tl.name} ({tl.email})</option>)}
-                    </select>
-                  </div>
+                  <GlassSelect
+                    value={newUser.teamLeadId}
+                    onChange={v => setNewUser(u => ({ ...u, teamLeadId: v }))}
+                    options={teamLeadsList.map(tl => ({ value: tl._id, label: `${tl.name} (${tl.email})` }))}
+                    placeholder="None"
+                  />
                   <div className="form-hint">Assign this engineer to a team lead</div>
                 </div>
               )}
@@ -1418,12 +1451,12 @@ ${data.map(c => `<tr><td>${escapeHtml(c.ticketId)}</td><td>${escapeHtml(c.userNa
               {newUser.role === 'engineer' && (
                 <div className="form-group">
                   <label className="form-label">Team Lead</label>
-                  <div className="material-select-wrap">
-                    <select className="form-control" value={newUser.teamLeadId || ''} onChange={e => setNewUser(u => ({ ...u, teamLeadId: e.target.value }))}>
-                      <option value="">None</option>
-                      {teamLeadsList.map(tl => <option key={tl._id} value={tl._id}>{tl.name} ({tl.email})</option>)}
-                    </select>
-                  </div>
+                  <GlassSelect
+                    value={newUser.teamLeadId || ''}
+                    onChange={v => setNewUser(u => ({ ...u, teamLeadId: v }))}
+                    options={teamLeadsList.map(tl => ({ value: tl._id, label: `${tl.name} (${tl.email})` }))}
+                    placeholder="None"
+                  />
                 </div>
               )}
               <div className="form-group">
